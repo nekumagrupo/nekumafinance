@@ -361,6 +361,9 @@
     return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
   }
 
+  Object.assign(messages["en-US"], { "Proximo": "Next", "Concluir": "Finish", "Botao +": "+ button", "Scan": "Receipt scan" });
+  Object.assign(messages["ja-JP"], { "Proximo": "次へ", "Concluir": "完了", "Botao +": "＋ボタン", "Scan": "レシート読取" });
+
   const foldedMessages = Object.fromEntries(Object.entries(messages).map(([locale, dictionary]) => [
     locale,
     Object.fromEntries(Object.entries(dictionary).map(([source, translation]) => [fold(source), translation]))

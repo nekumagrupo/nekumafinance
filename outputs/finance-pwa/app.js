@@ -441,7 +441,7 @@
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./service-worker.js?v=263")
+      navigator.serviceWorker.register("./service-worker.js?v=265")
         .then((registration) => registration.update().catch(() => {}))
         .catch(() => {});
     });
@@ -645,8 +645,8 @@
     if (action === "delete-categorization-rule") deleteItem("categorizationRules", button.dataset.id, "Regra removida.");
     if (action === "export-financial-calendar") exportFinancialCalendar();
     if (action === "enable-notifications") enableSmartNotifications();
-    if (action === "start-tutorial") startGuidedTutorial();
     if (action === "tutorial-next") advanceGuidedTutorial();
+    if (action === "tutorial-back") advanceGuidedTutorial(-1);
     if (action === "tutorial-skip") finishGuidedTutorial();
     if (action === "close-modal") closeModal();
     if (action === "pay-commitment") payCommitment(button.dataset.id);
@@ -2847,7 +2847,7 @@
     scheduleCdiRefresh(false);
     setTimeout(showDueAlertIfNeeded, 250);
     setTimeout(runSmartNotifications, 700);
-    requestAnimationFrame(refreshGuidedTutorial);
+    document.querySelector("#guidedTutorial")?.remove();
   }
 
   function renderDesktopPrototypeNav() {
@@ -5256,7 +5256,7 @@
 
           <article class="content-panel">
             <div class="panel-head"><div><h2>Calendario e lembretes</h2><p class="row-meta">Vencimentos, faturas, metas, shaken, seguros e pagamentos importantes.</p></div><span class="chip green">ICS</span></div>
-            <div class="settings-action-stack"><button class="secondary-button" type="button" data-action="export-financial-calendar"><span data-lucide="calendar-plus"></span>Exportar para Google, Apple ou calendario do aparelho</button><button class="secondary-button" type="button" data-action="enable-notifications"><span data-lucide="bell-ring"></span>${state.notificationPreferences.enabled ? "Notificacoes ativadas" : "Ativar notificacoes"}</button><button class="secondary-button" type="button" data-action="start-tutorial"><span data-lucide="route"></span>Repetir tutorial</button></div>
+            <div class="settings-action-stack"><button class="secondary-button" type="button" data-action="export-financial-calendar"><span data-lucide="calendar-plus"></span>Exportar para Google, Apple ou calendario do aparelho</button><button class="secondary-button" type="button" data-action="enable-notifications"><span data-lucide="bell-ring"></span>${state.notificationPreferences.enabled ? "Notificacoes ativadas" : "Ativar notificacoes"}</button></div>
             ${renderNotificationPreferenceControls()}
           </article>
 
@@ -19217,26 +19217,59 @@
   }
 
   const tutorialSteps = [
-    { tab: "dashboard", title: "Dashboard", text: "Resumo do mes, saldos e evolucao financeira." },
-    { tab: "dashboard", title: "Botao +", text: "Central para registrar movimentacoes e usar o scan." },
-    { tab: "accounts", title: "Contas", text: "Saldos, entradas, saidas e contas bancarias." },
-    { tab: "family", title: "Familia", text: "Membros, responsabilidades e gastos por pessoa." },
-    { tab: "family", title: "Moradia", text: "Divisao de aluguel, luz, agua, internet e demais contas." },
-    { tab: "budgets", title: "Orcamentos", text: "Limites por categoria e alertas de consumo." },
-    { tab: "reports", title: "Extrato", text: "Detalhamento completo de todos os lancamentos." },
-    { tab: "dashboard", title: "Scan", text: "Fotografe recibos e revise antes de confirmar o gasto." }
+    { tab: "dashboard", title: "Dashboard", text: "Comece pelo resumo do mes. Confira os saldos das contas, os ultimos lancamentos e os gastos da familia. Selecione outro mes no topo para consultar um periodo diferente." },
+    { tab: "dashboard", title: "Botao +", text: "Use o botao + para registrar uma entrada ou um gasto e acessar o scan de recibos. Confira o valor, a data e a conta antes de confirmar um lancamento." },
+    { tab: "accounts", title: "Contas", text: "Cadastre suas contas bancarias e informe o saldo inicial. Ao registrar uma movimentacao, vincule a conta correspondente para manter o saldo atualizado." },
+    { tab: "family", title: "Familia", text: "Conecte os membros da familia e acompanhe quanto cada pessoa gastou no mes. Ao lancar um gasto, indique quem gastou para que ele apareca no resumo correto." },
+    { tab: "family", title: "Moradia", text: "Cadastre aluguel, luz, agua, gas e internet. Defina quem paga cada conta e de qual conta bancaria sai o dinheiro. Cada membro acompanha suas responsabilidades." },
+    { tab: "budgets", title: "Orcamentos", text: "Defina um limite mensal para cada categoria, como mercado ou transporte. Compare o valor gasto com o limite para saber quanto ainda pode gastar no mes." },
+    { tab: "reports", title: "Extrato", text: "Consulte os detalhes dos lancamentos, incluindo categoria, forma de pagamento e conta. Use os filtros para encontrar uma movimentacao e revisar seus dados." },
+    { tab: "dashboard", title: "Scan", text: "Fotografe ou selecione um recibo e toque em Ler com IA. Revise loja, total, data, pagamento e quem gastou. Somente ao confirmar o gasto ele entra nos lancamentos e resumos do app." }
   ];
 
   function startGuidedTutorial() { closeModal(); state.ui.tutorialCompleted = false; state.ui.tutorialStep = 0; state.ui.activeTab = tutorialSteps[0].tab; persistLocalState(); render(); }
-  function advanceGuidedTutorial() { state.ui.tutorialStep += 1; if (state.ui.tutorialStep >= tutorialSteps.length) { finishGuidedTutorial(); return; } state.ui.activeTab = tutorialSteps[state.ui.tutorialStep].tab; persistLocalState(); render(); }
+  function advanceGuidedTutorial(direction = 1) { state.ui.tutorialStep = Math.max(0, state.ui.tutorialStep + direction); if (state.ui.tutorialStep >= tutorialSteps.length) { finishGuidedTutorial(); return; } state.ui.activeTab = tutorialSteps[state.ui.tutorialStep].tab; persistLocalState(); render(); }
   function finishGuidedTutorial() { document.querySelector("#guidedTutorial")?.remove(); state.ui.tutorialCompleted = true; state.ui.tutorialStep = 0; saveState(); renderKeepingScroll(); showToast("Tutorial concluido. Voce pode repeti-lo em Ajustes."); }
   function refreshGuidedTutorial() {
     document.querySelector("#guidedTutorial")?.remove();
     if (state.ui.tutorialCompleted || remoteStore.enabled && remoteSession.status !== "ready") return;
     const stepIndex = clamp(number(state.ui.tutorialStep), 0, tutorialSteps.length - 1); const step = tutorialSteps[stepIndex];
+    const localizedDescriptions = {
+      "en-US": [
+        "Start with your monthly overview: account balances, recent transactions and family spending. Select a month at the top to review a different period.",
+        "Use the + button to record income or an expense, or scan a receipt. Check the amount, date and account before confirming a transaction.",
+        "Add your bank accounts and opening balances. Link each transaction to the corresponding account to keep its balance up to date.",
+        "Connect family members and follow each person's monthly spending. Select who spent the money when recording an expense.",
+        "Add rent, electricity, water, gas and internet. Choose who pays each bill and which bank account is used. Each member can follow their responsibilities.",
+        "Set a monthly limit for each category, such as groceries or transport. Compare spending with the limit to see how much remains.",
+        "Review transaction details, including category, payment method and account. Use filters to find a transaction and check its information.",
+        "Take or select a receipt photo and choose Read with AI. Review the store, total, date, payment and spender. Only confirmed expenses enter your transactions and summaries."
+      ],
+      "ja-JP": [
+        "月ごとの口座残高、最近の取引、家族の支出を確認できます。上部で月を選ぶと、別の期間を確認できます。",
+        "＋ボタンから収入や支出を登録し、レシートを読み取れます。金額、日付、口座を確認してから登録してください。",
+        "銀行口座と開始残高を登録します。取引ごとに該当する口座を選ぶと、残高に反映されます。",
+        "家族をつなぎ、メンバーごとの月間支出を確認できます。支出を登録するときは、誰が使ったかを選んでください。",
+        "家賃、電気、水道、ガス、インターネットを登録します。各請求の支払担当者と引き落とし口座を設定すると、それぞれの負担を確認できます。",
+        "食費や交通費など、カテゴリごとに月の上限を設定します。支出と予算を比較し、残りの金額を確認できます。",
+        "カテゴリ、支払方法、口座など取引の詳細を確認できます。フィルターで取引を探し、内容を確認してください。",
+        "レシートを撮影または選択し、AIで読み取ります。店舗、合計金額、日付、支払方法、利用者を確認してください。確定した支出だけが取引一覧と集計に反映されます。"
+      ]
+    };
+    const description = localizedDescriptions[activeLanguage()]?.[stepIndex] || step.text;
     const overlay = document.createElement("div"); overlay.id = "guidedTutorial"; overlay.className = "guided-tutorial";
-    overlay.innerHTML = `<div class="guided-tutorial-card"><span>${stepIndex + 1} de ${tutorialSteps.length}</span><h2>${escapeHtml(step.title)}</h2><p>${escapeHtml(step.text)}</p><div><button type="button" class="secondary-button" data-action="tutorial-skip">Pular</button><button type="button" class="primary-button" data-action="tutorial-next">${stepIndex === tutorialSteps.length - 1 ? "Concluir" : "Proximo"}</button></div></div>`;
+    overlay.innerHTML = `<section class="guided-tutorial-card" role="dialog" aria-modal="true" aria-labelledby="tutorialTitle" aria-describedby="tutorialDescription"><span>${stepIndex + 1} / ${tutorialSteps.length}</span><progress max="${tutorialSteps.length}" value="${stepIndex + 1}" aria-label="Tutorial"></progress><h2 id="tutorialTitle">${escapeHtml(step.title)}</h2><p id="tutorialDescription">${escapeHtml(description)}</p><div class="tutorial-actions"><button type="button" class="secondary-button" data-action="tutorial-skip">Pular</button><button type="button" class="secondary-button" data-action="tutorial-back" ${stepIndex === 0 ? "disabled" : ""}>Voltar</button><button type="button" class="primary-button" data-action="tutorial-next">${stepIndex === tutorialSteps.length - 1 ? "Concluir" : "Proximo"}</button></div></section>`;
+    i18n?.translate(overlay, activeLanguage());
     document.body.appendChild(overlay);
+    overlay.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") { event.preventDefault(); finishGuidedTutorial(); }
+      if (event.key !== "Tab") return;
+      const buttons = [...overlay.querySelectorAll("button:not(:disabled)")];
+      const first = buttons[0], last = buttons[buttons.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    });
+    overlay.querySelector('[data-action="tutorial-next"]').focus({ preventScroll: true });
   }
 
   function number(value) {

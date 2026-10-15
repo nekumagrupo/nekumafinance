@@ -1,4 +1,4 @@
-const CACHE_NAME = "nekuma-finance-v263";
+const CACHE_NAME = "nekuma-finance-v265";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -6,9 +6,9 @@ const APP_SHELL = [
   "./privacy.html",
   "./terms.html",
   "./clean.html",
-  "./styles.css?v=263",
-  "./app.js?v=263",
-  "./i18n.js?v=263",
+  "./styles.css?v=265",
+  "./app.js?v=265",
+  "./i18n.js?v=265",
   "./metamask.js?v=212",
   "./binance.js?v=212",
   "./assistant-help.js?v=212",
