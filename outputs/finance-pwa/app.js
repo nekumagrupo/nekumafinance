@@ -12,6 +12,7 @@
   const PRIMARY_CURRENCY = "JPY";
   const DEFAULT_SECONDARY_CURRENCY = "BRL";
   const urlParams = new URLSearchParams(window.location.search);
+  const i18n = window.NekumaI18n || null;
   const supportedCurrencies = {
     JPY: { label: "JPY - Ienes", locale: "ja-JP", fraction: 0 },
     BRL: { label: "BRL - Real", locale: "pt-BR", fraction: 2 },
@@ -400,6 +401,8 @@
   let passwordRecoveryEmail = "";
   let passwordRecoveryBusy = false;
   const SOCIAL_AUTH_PENDING_KEY = "nekuma-social-auth-pending";
+  let languageSetupRequired = false;
+  let languageChangeInProgress = false;
   let receiptScanImageData = "";
   let receiptScanResult = null;
   let receiptScanBusy = false;
@@ -438,7 +441,7 @@
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./service-worker.js?v=257")
+      navigator.serviceWorker.register("./service-worker.js?v=263")
         .then((registration) => registration.update().catch(() => {}))
         .catch(() => {});
     });
@@ -476,6 +479,19 @@
     }
     if (action === "install-login") { installLoginApp(); return; }
     if (action === "auth-google") { signInWithGoogle(button.dataset.context || "login"); return; }
+    if (action === "confirm-app-language") {
+      confirmAppLanguage(button.dataset.language).catch((error) => {
+        remoteSession.error = error.message || "Nao foi possivel salvar o idioma.";
+        render();
+      });
+      return;
+    }
+    if (action === "apply-settings-language") {
+      applySettingsLanguage().catch((error) => {
+        showToast(error.message || "Nao foi possivel salvar o idioma.");
+      });
+      return;
+    }
     if (action === "none") return;
     if (action === "set-auth-view") {
       authView = button.dataset.view || "welcome";
@@ -767,6 +783,11 @@
   });
 
   document.addEventListener("change", (event) => {
+    if (event.target.matches("[data-public-language]")) {
+      i18n?.setPublicLanguage(event.target.value);
+      window.location.reload();
+      return;
+    }
     if (event.target.matches("[data-notification-preference]")) {
       state.notificationPreferences[event.target.dataset.notificationPreference] = event.target.checked;
       saveState();
@@ -883,6 +904,48 @@
     };
   }
 
+  function activeLanguage() {
+    if (remoteStore?.enabled && !["ready", "languageSetup"].includes(remoteSession?.status)) {
+      return i18n?.publicLanguage() || "pt-BR";
+    }
+    const profileLanguage = state?.profile?.language;
+    return i18n?.normalize(profileLanguage || i18n.publicLanguage()) || profileLanguage || "pt-BR";
+  }
+
+  function prepareAuthenticatedLanguage(user = remoteSession.user) {
+    if (!i18n) return;
+    const metadata = user?.user_metadata || {};
+    const savedLanguage = metadata.app_language ? i18n.normalize(metadata.app_language) : "";
+    const publicLanguage = i18n.publicLanguage();
+    state.profile.language = savedLanguage || publicLanguage;
+    languageSetupRequired = metadata.app_language_confirmed !== true;
+    document.documentElement.lang = state.profile.language;
+  }
+
+  async function confirmAppLanguage(locale) {
+    if (!remoteSession.user || languageChangeInProgress) return;
+    const normalized = i18n?.normalize(locale) || "pt-BR";
+    languageChangeInProgress = true;
+    remoteSession.error = "";
+    try {
+      const { data, error } = await remoteStore.client.auth.updateUser({
+        data: { app_language: normalized, app_language_confirmed: true }
+      });
+      if (error) throw error;
+      remoteSession.user = data?.user || remoteSession.user;
+      state.profile.language = normalized;
+      i18n?.setPublicLanguage(normalized);
+      languageSetupRequired = false;
+      remoteSession.status = "ready";
+      saveState({ remoteNow: true });
+      startRemoteAutoSync();
+      render();
+      showToast(i18n?.t("Ajustes salvos.", normalized) || "Ajustes salvos.");
+    } finally {
+      languageChangeInProgress = false;
+    }
+  }
+
   async function initApp() {
     setupWeb3Listeners();
     persistLocalState();
@@ -938,7 +1001,8 @@
       else await loadRemoteState(familyName);
       clearPendingSocialAuth();
       clearAuthCallbackParams();
-      remoteSession.status = "ready";
+      prepareAuthenticatedLanguage(remoteSession.user);
+      remoteSession.status = languageSetupRequired ? "languageSetup" : "ready";
       startRemoteAutoSync();
       renderKeepingScroll();
       restoreSavedScrollPosition();
@@ -965,7 +1029,8 @@
       const inviteCode = normalizeInviteCode(data.inviteCode);
       if (inviteCode) await joinRemoteHouseholdByCode(inviteCode);
       else await loadRemoteState(remoteSession.user?.user_metadata?.family_name);
-      remoteSession.status = "ready";
+      prepareAuthenticatedLanguage(authData.user);
+      remoteSession.status = languageSetupRequired ? "languageSetup" : "ready";
       startRemoteAutoSync();
       render();
       showToast(inviteCode ? "Familia conectada." : "Login realizado.");
@@ -2734,6 +2799,7 @@
       window.NekumaBinance?.clear();
       window.NekumaAI?.clear();
       app.innerHTML = renderAuthGate();
+      i18n?.translate(document.body, activeLanguage());
       refreshIcons();
       return;
     }
@@ -2755,6 +2821,7 @@
           : currentTabContent
       ].join("");
     app.innerHTML = `${renderDesktopPrototypeNav()}${pageContent}`;
+    i18n?.translate(document.body, activeLanguage());
 
     document.querySelectorAll(".nav-item").forEach((item) => {
       const menuActive = item.hasAttribute("data-nav-menu") && state.ui.activeTab !== "dashboard";
@@ -2771,7 +2838,10 @@
     setupDashboardAccountCarousel();
     setupBankAccountOrdering();
     setupCreditCardHomeCarousel();
-    requestAnimationFrame(drawVisibleCharts);
+    requestAnimationFrame(() => {
+      drawVisibleCharts();
+      i18n?.translate(document.body, activeLanguage());
+    });
     scheduleFxRefresh(false);
     scheduleCryptoRefresh(false);
     scheduleCdiRefresh(false);
@@ -3047,13 +3117,14 @@
 
   function renderAuthGate() {
     const isLoading = remoteSession.status === "loading";
+    if (remoteSession.status === "languageSetup") return renderLanguageSetup();
     const canSignup = remoteStore.config.enableSignup !== false;
     const view = authView === "login" || authView === "signup" || authView === "reset" ? authView : "welcome";
     const isSignup = view === "signup";
     const isReset = view === "reset";
     return `
       <section class="auth-panel auth-panel-${view}">
-        <header class="auth-navigation"><a href="./index.html?home=1" class="auth-home-brand"><img src="./assets/nekuma-logo-192.png" alt="" width="40" height="40" /><span>Nekuma Finance</span></a></header>
+        <header class="auth-navigation"><a href="./index.html?home=1" class="auth-home-brand"><img src="./assets/nekuma-logo-192.png" alt="" width="40" height="40" /><span>Nekuma Finance</span></a>${i18n ? i18n.languageSelector("auth-language-selector") : ""}</header>
         <article class="auth-visual">
           <img class="auth-brand-mark" src="./assets/nekuma-logo-192.png" alt="" />
           <div>
@@ -3084,6 +3155,30 @@
         </article>
       </section>
     `;
+  }
+
+  function renderLanguageSetup() {
+    const selectedLanguage = activeLanguage();
+    const options = [
+      { locale: "pt-BR", native: "Português", detail: "Brasil e comunidade brasileira no Japão" },
+      { locale: "en-US", native: "English", detail: "International English" },
+      { locale: "ja-JP", native: "日本語", detail: "日本での家計管理" }
+    ];
+    return `
+      <section class="auth-panel auth-panel-language">
+        <header class="auth-navigation"><a href="./index.html?home=1" class="auth-home-brand"><img src="./assets/nekuma-logo-192.png" alt="" width="40" height="40" /><span>Nekuma Finance</span></a></header>
+        <article class="auth-visual language-setup-visual">
+          <img class="auth-brand-mark" src="./assets/nekuma-logo-192.png" alt="" />
+          <div><p class="auth-kicker">Nekuma Finance</p><h2>${i18n?.t("Escolha o idioma do aplicativo", selectedLanguage) || "Escolha o idioma do aplicativo"}</h2></div>
+        </article>
+        <article class="auth-card language-setup-card">
+          <div class="auth-card-head"><div><p class="auth-kicker">Language · Idioma · 言語</p><h2>${i18n?.t("Escolha o idioma do aplicativo", selectedLanguage) || "Escolha o idioma do aplicativo"}</h2></div></div>
+          <p class="auth-lead">${i18n?.t("Você poderá alterar esta opção depois em Ajustes.", selectedLanguage) || "Você poderá alterar esta opção depois em Ajustes."}</p>
+          <div class="language-choice-grid">
+            ${options.map((option) => `<button class="language-choice ${option.locale === selectedLanguage ? "is-selected" : ""}" type="button" data-action="confirm-app-language" data-language="${option.locale}" ${languageChangeInProgress ? "disabled" : ""}><span>${option.locale === "ja-JP" ? "あ" : option.locale === "en-US" ? "EN" : "PT"}</span><strong>${option.native}</strong><small>${option.detail}</small><i data-lucide="chevron-right" aria-hidden="true"></i></button>`).join("")}
+          </div>
+        </article>
+      </section>`;
   }
 
   function renderAuthWelcome(canSignup) {
@@ -3529,6 +3624,7 @@
         </div>
       </div>
     `;
+    i18n?.translate(modalRoot, activeLanguage());
     refreshIcons();
   }
 
@@ -5132,7 +5228,7 @@
                 <div class="three-cols">
                   <div class="field"><label for="profileAge">Idade</label><input id="profileAge" name="profileAge" inputmode="numeric" value="${escapeAttr(state.profile.age)}" placeholder="--" /></div>
                   <div class="field"><label for="profileGender">Sexo</label><select id="profileGender" name="profileGender"><option value="" ${selectedAttr("", state.profile.gender)}>Nao informado</option><option value="feminino" ${selectedAttr("feminino", state.profile.gender)}>Feminino</option><option value="masculino" ${selectedAttr("masculino", state.profile.gender)}>Masculino</option><option value="outro" ${selectedAttr("outro", state.profile.gender)}>Outro</option></select></div>
-                  <div class="field"><label for="profileLanguage">Idioma</label><select id="profileLanguage" name="profileLanguage"><option value="pt-BR" ${selectedAttr("pt-BR", state.profile.language)}>Portugues</option><option value="ja-JP" ${selectedAttr("ja-JP", state.profile.language)}>Japones</option><option value="en-US" ${selectedAttr("en-US", state.profile.language)}>Ingles</option></select></div>
+                  <div class="field language-settings-field"><label for="profileLanguage">Idioma</label><select id="profileLanguage" name="profileLanguage"><option value="pt-BR" ${selectedAttr("pt-BR", state.profile.language)}>Portugues</option><option value="ja-JP" ${selectedAttr("ja-JP", state.profile.language)}>Japones</option><option value="en-US" ${selectedAttr("en-US", state.profile.language)}>Ingles</option></select><button class="small-action language-apply-button" type="button" data-action="apply-settings-language">Aplicar idioma</button></div>
                 </div>
               </div>
               <div class="settings-rate-card">
@@ -8706,6 +8802,7 @@
         </div>
       </div>
     `;
+    i18n?.translate(modalRoot, activeLanguage());
     const first = modalRoot.querySelector("input, select, textarea, button");
     if (first) first.focus();
     updateTransferPreview();
@@ -13011,8 +13108,16 @@
     showToast(target.kind === "card" && accumulatedAmount < number(target.amount) ? "Pagamento parcial registrado." : `${target.category} marcado como pago.`);
   }
 
-  function saveSettings(form) {
+  async function saveSettings(form) {
     const data = formData(form);
+    const previousLanguage = activeLanguage();
+    const requestedLanguage = i18n?.normalize(data.profileLanguage || previousLanguage) || String(data.profileLanguage || previousLanguage);
+    const languageChanged = requestedLanguage !== previousLanguage;
+    if (languageChanged) {
+      const title = i18n?.t("Confirmar alteração de idioma?", previousLanguage) || "Confirmar alteração de idioma?";
+      const detail = i18n?.t("O aplicativo será reiniciado para aplicar o novo idioma.", previousLanguage) || "O aplicativo será reiniciado para aplicar o novo idioma.";
+      if (!window.confirm(`${title}\n\n${detail}`)) return;
+    }
     state.settings.familyName = data.familyName.trim() || "Familia";
     state.settings.familyLeaderId = String(data.familyLeaderId || "").trim();
     const baseCurrency = sanitizeCurrency(data.baseCurrency, PRIMARY_CURRENCY);
@@ -13023,15 +13128,64 @@
       city: String(data.profileCity || "").trim(),
       age: String(data.profileAge || "").replace(/\D/g, "").slice(0, 3),
       gender: String(data.profileGender || "").trim(),
-      language: String(data.profileLanguage || "pt-BR").trim(),
+      language: requestedLanguage,
       avatarDataUrl: sanitizeProfileAvatar(state.profile.avatarDataUrl)
     };
     saveState();
     updateRemoteHouseholdName(state.settings.familyName).catch((error) => {
       remoteSession.error = error.message || "Falha ao atualizar familia.";
     });
+    if (languageChanged && remoteStore.enabled && remoteSession.user) {
+      const { data: updated, error } = await remoteStore.client.auth.updateUser({
+        data: { app_language: requestedLanguage, app_language_confirmed: true }
+      });
+      if (error) {
+        state.profile.language = previousLanguage;
+        saveState();
+        showToast(error.message || "Nao foi possivel salvar o idioma.");
+        return;
+      }
+      remoteSession.user = updated?.user || remoteSession.user;
+    }
+    i18n?.setPublicLanguage(requestedLanguage);
+    if (languageChanged) {
+      const splash = document.getElementById("refresh-splash");
+      const label = splash?.querySelector("span");
+      if (label) label.textContent = i18n?.t("Aplicando idioma", requestedLanguage) || "Aplicando idioma";
+      splash?.classList.add("is-visible");
+      setTimeout(() => window.location.reload(), 650);
+      return;
+    }
     render();
-    showToast("Ajustes salvos.");
+    showToast(i18n?.t("Ajustes salvos.", requestedLanguage) || "Ajustes salvos.");
+  }
+
+  async function applySettingsLanguage() {
+    const select = document.querySelector("#profileLanguage");
+    const requestedLanguage = i18n?.normalize(select?.value || activeLanguage()) || "pt-BR";
+    const previousLanguage = activeLanguage();
+    if (requestedLanguage === previousLanguage) {
+      showToast(i18n?.t("O idioma selecionado ja esta ativo.", previousLanguage) || "O idioma selecionado ja esta ativo.");
+      return;
+    }
+    const title = i18n?.t("Confirmar alteracao de idioma?", previousLanguage) || "Confirmar alteracao de idioma?";
+    const detail = i18n?.t("O aplicativo sera reiniciado para aplicar o novo idioma.", previousLanguage) || "O aplicativo sera reiniciado para aplicar o novo idioma.";
+    if (!window.confirm(`${title}\n\n${detail}`)) return;
+    if (remoteStore.enabled && remoteSession.user) {
+      const { data: updated, error } = await remoteStore.client.auth.updateUser({
+        data: { app_language: requestedLanguage, app_language_confirmed: true }
+      });
+      if (error) throw error;
+      remoteSession.user = updated?.user || remoteSession.user;
+    }
+    state.profile.language = requestedLanguage;
+    i18n?.setPublicLanguage(requestedLanguage);
+    saveState({ remoteNow: true });
+    const splash = document.getElementById("refresh-splash");
+    const label = splash?.querySelector("span");
+    if (label) label.textContent = i18n?.t("Aplicando idioma", requestedLanguage) || "Aplicando idioma";
+    splash?.classList.add("is-visible");
+    setTimeout(() => window.location.reload(), 500);
   }
 
   function payCommitment(id) {
@@ -18061,25 +18215,42 @@
     if (!account) return 0;
     const cutoff = dateInMonth(month || currentMonth(), 31);
     const balanceDate = account.balanceDate || dateInMonth(currentMonth(), new Date().getDate());
-    if (balanceDate > cutoff) return 0;
     const currency = sanitizeCurrency(account.currency, countryMeta[account.country]?.currency || primaryCurrency());
-    let balance = number(account.initialBalance);
+    let balance = balanceDate <= cutoff ? number(account.initialBalance) : 0;
     const applyMovement = (amount, movementCurrency, date, direction) => {
-      if (!date || date <= balanceDate || date > cutoff) return;
-      balance += direction * convert(amount, movementCurrency, currency, latestRate(date.slice(0, 7)));
+      if (!date || date > cutoff) return;
+      if (direction.force) {
+        if (balanceDate > cutoff && String(date).slice(0, 7) !== month) return;
+        if (balanceDate <= cutoff && date < balanceDate) return;
+      } else if (date < balanceDate) return;
+      balance += direction.value * convert(amount, movementCurrency, currency, latestRate(date.slice(0, 7)));
+    };
+    const salarySourceAccountId = (paymentKey) => {
+      const sourceId = String(paymentKey || "").split(":salary:")[1] || "";
+      return sourceId ? incomeSourceById(sourceId)?.bankAccountId || "" : "";
     };
 
     (state.transactions || [])
-      .filter((item) => item.bankAccountId === account.id)
+      .filter((item) => item.bankAccountId === account.id || (item.salaryPaymentKey && salarySourceAccountId(item.salaryPaymentKey) === account.id))
       .forEach((item) => {
-        if (item.type === "income") applyMovement(item.bankAmount ?? item.amount, item.currency, item.date, 1);
-        if (allOutflowTypes.includes(item.type) && item.affectsBankBalance !== false) applyMovement(item.amount, item.currency, item.date, -1);
+        const confirmedSalary = item.salaryPaymentKey && state.paidCommitments?.[item.salaryPaymentKey];
+        if (item.type === "income" && !confirmedSalary) applyMovement(item.bankAmount ?? item.amount, item.currency, item.date, { value: 1, force: Boolean(item.salaryPaymentKey || item.forceBankBalance) });
+        if (allOutflowTypes.includes(item.type) && item.affectsBankBalance !== false) applyMovement(item.amount, item.currency, item.date, { value: -1, force: false });
+      });
+
+    Object.entries(state.paidCommitments || {})
+      .filter(([key, payment]) => (payment?.bankAccountId === account.id || salarySourceAccountId(key) === account.id) && number(payment.amount) > 0)
+      .forEach(([key, payment]) => {
+        const paymentMonth = payment.paymentMonth || String(payment.receivedAt || "").slice(0, 7) || month;
+        const receivedDate = String(payment.receivedAt || "").slice(0, 10);
+        const paymentDate = receivedDate.startsWith(`${paymentMonth}-`) ? receivedDate : `${paymentMonth}-01`;
+        applyMovement(payment.amount, payment.currency || currency, paymentDate, { value: 1, force: true });
       });
 
     (state.workIncomes || [])
       .filter((item) => item.bankAccountId === account.id)
       .filter((item) => item.paid !== false)
-      .forEach((item) => applyMovement(item.amount, item.currency, item.date, 1));
+      .forEach((item) => applyMovement(item.amount, item.currency, item.date, { value: 1, force: false }));
 
     return round(balance, currency === "JPY" ? 0 : 2);
   }
@@ -19125,7 +19296,7 @@
 
   function showToast(message) {
     clearTimeout(toastTimer);
-    toast.textContent = message;
+    toast.textContent = i18n?.t(String(message || ""), activeLanguage()) || message;
     toast.classList.add("is-visible");
     toastTimer = setTimeout(() => toast.classList.remove("is-visible"), 2300);
   }

@@ -9,12 +9,13 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
     page.on('pageerror', error => errors.push(error.message));
     await page.route('https://**/*', r => r.abort());
     await page.route('**/supabase-config.js*', r => r.fulfill({ contentType: 'application/javascript', body: 'window.PONTE_SUPABASE_CONFIG = {};' }));
-    await page.route('**/app.js*', r => r.fulfill({ contentType: 'application/javascript', body: fs.readFileSync('outputs/finance-pwa/app.js', 'utf8').replace('  initApp();', 'window.testSalary = { openModal, estimateFactorySourceSalary, estimateSalaryDeductions, salaryReceiptTargetFromRef, factoryScheduleDay, contractShiftHours, createInitialState, normalizeState, render, renderIncomeSourceModal, renderWorkOverrideModal, saveIncomeSource, saveWorkOverride, getState: () => state, setState: s => { state = s; } };\n  initApp();') }));
+    await page.route('**/app.js*', r => r.fulfill({ contentType: 'application/javascript', body: fs.readFileSync('outputs/finance-pwa/app.js', 'utf8').replace('  initApp();', 'window.testSalary = { openModal, estimateFactorySourceSalary, estimateSalaryDeductions, salaryReceiptTargetFromRef, bankAccountBalance, factoryScheduleDay, contractShiftHours, createInitialState, normalizeState, render, renderIncomeSourceModal, renderWorkOverrideModal, saveIncomeSource, saveWorkOverride, getState: () => state, setState: s => { state = s; } };\n  initApp();') }));
     await page.goto('http://127.0.0.1:4174/app.html');
     const results = await page.evaluate(() => {
       const t = window.testSalary;
       const source = { id: 'test-factory', name: 'Fabrica teste', type: 'factory', currency: 'JPY', bankAccountId: 'salary-bank', salaryCalculationMode: 'contract', salaryHourlyRate: 1600, salaryTeijiHours: 9, salaryFixedOvertimeHours: 2, salaryOvertimeRate: 25, salaryNightRate: 25, salaryHolidayRate: 35, salaryRestRate: 25, salaryOvertimeThreshold: 60, salaryOvertimeHighRate: 50, salaryClosingDay: 31, salaryNightStart: '22:00', salaryNightEnd: '05:00', cycleStartDate: '2026-08-01', salaryDeductionsEnabled: true, salaryStandardRemuneration: 260000, salaryHealthRate: 5.065, salaryPensionRate: 9.15, salaryEmploymentRate: .5, salaryChildSupportRate: .115, salaryIncomeTaxFixed: 10240, salaryHousingDeduction: 56200, salaryParkingDeduction: 3300 };
       const state = t.createInitialState();
+      state.ui.tutorialCompleted = true;
       state.bankAccounts = [{ id: 'salary-bank', bankName: 'Yucho', nickname: 'Correio', country: 'japao', currency: 'JPY', active: true }];
       state.incomeSources = [source];
       t.setState(t.normalizeState(state));
@@ -136,6 +137,13 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
     assert.equal(receipt.deductions, 108859);
     assert.equal(receipt.amount, 372280);
     assert.equal(receipt.netAmount, 263421);
+    await page.evaluate((receiptDate) => {
+      const account = window.testSalary.getState().bankAccounts[0];
+      account.initialBalance = 1000;
+      const nextMonth = new Date(`${receiptDate.slice(0, 7)}-01T12:00:00`);
+      nextMonth.setMonth(nextMonth.getMonth() + 1);
+      account.balanceDate = nextMonth.toISOString().slice(0, 10);
+    }, receipt.date);
     await page.evaluate(() => window.testSalary.openModal('salaryReceipt', 'factory:test-factory:2026-08:2026-09'));
     await page.locator('form[data-form="salary-receipt"] button[type="submit"]').click();
     const payroll = await page.evaluate(() => {
@@ -144,11 +152,13 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
         gross: state.transactions.find(item => item.type === 'income' && item.paymentRef == null)?.amount,
         deductions: state.transactions.filter(item => item.payrollKey).reduce((sum, item) => sum + item.amount, 0),
         rentPaid: Boolean(state.paidCommitments['2026-09:housing:housing-company:rent']),
-        parkingPaid: Boolean(state.paidCommitments['2026-09:housing:housing-company:parking'])
+        parkingPaid: Boolean(state.paidCommitments['2026-09:housing:housing-company:parking']),
+        bankBalance: window.testSalary.bankAccountBalance(state.bankAccounts[0], '2026-09')
       };
     });
     assert.equal(payroll.gross, 372280);
     assert.equal(payroll.deductions, 108859);
+    assert.equal(payroll.bankBalance, 263421);
     assert.equal(payroll.rentPaid, true);
     assert.equal(payroll.parkingPaid, true);
     await page.evaluate(() => {
