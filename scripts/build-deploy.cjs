@@ -13,6 +13,7 @@ const publicFiles = [
   "terms.html",
   "clean.html",
   "app.js",
+  "i18n.js",
   "dashboard.js",
   "metamask.js",
   "binance.js",
@@ -78,9 +79,11 @@ function withVersion(fileName, content) {
   if (fileName === "metamask.js") {
     return content.replace(/metamask-connect\.js\?v=\d+/g, `metamask-connect.js?v=${version}`);
   }
-  if (fileName === "index.html" || fileName === "app.html") {
+  if (["index.html", "app.html", "privacy.html", "terms.html"].includes(fileName)) {
     return content
       .replace(/styles\.css\?v=\d+/g, `styles.css?v=${version}`)
+      .replace(/i18n\.js\?v=\d+/g, `i18n.js?v=${version}`)
+      .replace(/service-worker\.js\?v=\d+/g, `service-worker.js?v=${version}`)
       .replace(/supabase-config\.js\?v=\d+/g, `supabase-config.js?v=${version}`)
       .replace(/dashboard\.js\?v=\d+/g, `dashboard.js?v=${version}`)
       .replace(/metamask\.js\?v=\d+/g, `metamask.js?v=${version}`)
@@ -97,6 +100,7 @@ function withVersion(fileName, content) {
   if (fileName === "service-worker.js") {
     return content
       .replace(/nekuma-finance-v\d+/g, `nekuma-finance-v${version}`)
+      .replace(/i18n\.js\?v=\d+/g, `i18n.js?v=${version}`)
       .replace(/binance\.js\?v=\d+/g, `binance.js?v=${version}`)
       .replace(/assistant-help\.js\?v=\d+/g, `assistant-help.js?v=${version}`)
       .replace(/assistant\.js\?v=\d+/g, `assistant.js?v=${version}`)
