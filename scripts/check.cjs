@@ -2,6 +2,8 @@ const { spawnSync } = require("child_process");
 
 const files = [
   "outputs/finance-pwa/app.js",
+  "outputs/finance-pwa/home.js",
+  "outputs/finance-pwa/i18n.js",
   "outputs/finance-pwa/dashboard.js",
   "outputs/finance-pwa/metamask.js",
   "outputs/finance-pwa/binance.js",

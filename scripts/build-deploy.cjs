@@ -8,6 +8,8 @@ const version = process.env.DEPLOY_VERSION || buildVersion();
 
 const publicFiles = [
   "index.html",
+  "home.css",
+  "home.js",
   "app.html",
   "privacy.html",
   "terms.html",
@@ -82,6 +84,7 @@ function withVersion(fileName, content) {
   if (["index.html", "app.html", "privacy.html", "terms.html"].includes(fileName)) {
     return content
       .replace(/styles\.css\?v=\d+/g, `styles.css?v=${version}`)
+      .replace(/home\.(css|js)\?v=\d+/g, (match, extension) => `home.${extension}?v=${version}`)
       .replace(/i18n\.js\?v=\d+/g, `i18n.js?v=${version}`)
       .replace(/service-worker\.js\?v=\d+/g, `service-worker.js?v=${version}`)
       .replace(/supabase-config\.js\?v=\d+/g, `supabase-config.js?v=${version}`)
@@ -100,6 +103,7 @@ function withVersion(fileName, content) {
   if (fileName === "service-worker.js") {
     return content
       .replace(/nekuma-finance-v\d+/g, `nekuma-finance-v${version}`)
+      .replace(/home\.(css|js)\?v=\d+/g, (match, extension) => `home.${extension}?v=${version}`)
       .replace(/i18n\.js\?v=\d+/g, `i18n.js?v=${version}`)
       .replace(/binance\.js\?v=\d+/g, `binance.js?v=${version}`)
       .replace(/assistant-help\.js\?v=\d+/g, `assistant-help.js?v=${version}`)

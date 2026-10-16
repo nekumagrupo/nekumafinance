@@ -2,6 +2,9 @@ const CACHE_NAME = "nekuma-finance-v266";
 const APP_SHELL = [
   "./",
   "./index.html",
+  "./home.css?v=267",
+  "./home.js?v=267",
+  "./assets/home-family-japan.webp",
   "./app.html",
   "./privacy.html",
   "./terms.html",
