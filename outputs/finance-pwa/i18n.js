@@ -426,6 +426,27 @@
     catch (error) { return normalize(navigator.language); }
   }
 
+  function publicUrl(path) {
+    const productionHosts = ["nekumafinance.app", "app.nekumafinance.app", "nekuma-finance.pages.dev"];
+    if (!productionHosts.includes(window.location.hostname)) return path;
+    const url = new URL(path, window.location.href);
+    if (!productionHosts.includes(url.hostname)) return path;
+    if (/^\/app(?:\.html)?$/.test(url.pathname)) {
+      url.hostname = "app.nekumafinance.app";
+      url.pathname = "/app";
+    } else if (/^\/(?:index\.html)?$/.test(url.pathname)) {
+      url.hostname = "nekumafinance.app";
+      url.pathname = "/";
+      url.searchParams.delete("home");
+    } else if (/^\/(?:privacy|terms)(?:\.html)?$/.test(url.pathname)) {
+      url.hostname = "nekumafinance.app";
+    } else return path;
+    url.protocol = "https:";
+    url.port = "";
+    url.searchParams.set("lang", publicLanguage());
+    return url.href;
+  }
+
   function setPublicLanguage(locale) {
     const normalized = normalize(locale);
     try { localStorage.setItem(PUBLIC_LANGUAGE_KEY, normalized); } catch (error) {}
@@ -451,6 +472,11 @@
   function translate(root, locale) {
     if (!root) return;
     const normalized = normalize(locale || publicLanguage());
+    root.querySelectorAll?.("a[href]").forEach((link) => {
+      const href = link.getAttribute("href");
+      if (!href || href.startsWith("#") || /^(?:mailto:|tel:)/i.test(href)) return;
+      link.setAttribute("href", publicUrl(href));
+    });
     document.documentElement.lang = normalized;
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     const nodes = [];
@@ -476,5 +502,8 @@
     return `<label class="${className}"><span class="sr-only">Language</span><i data-lucide="languages" aria-hidden="true"></i><select data-public-language aria-label="Language">${SUPPORTED.map((item) => `<option value="${item}" ${item === locale ? "selected" : ""}>${labels[item]}</option>`).join("")}</select></label>`;
   }
 
-  window.NekumaI18n = { PUBLIC_LANGUAGE_KEY, SUPPORTED, labels, normalize, publicLanguage, setPublicLanguage, t, translate, languageSelector };
+  const requestedLanguage = new URLSearchParams(window.location.search).get("lang");
+  if (SUPPORTED.includes(requestedLanguage)) setPublicLanguage(requestedLanguage);
+
+  window.NekumaI18n = { PUBLIC_LANGUAGE_KEY, SUPPORTED, labels, normalize, publicLanguage, setPublicLanguage, publicUrl, t, translate, languageSelector };
 })();

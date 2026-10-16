@@ -84,10 +84,16 @@
         </section>
         <section>
           <h2>11. Contato e alterações</h2>
-          <p>Podemos atualizar esta política para refletir mudanças no produto ou na legislação. Alterações relevantes serão comunicadas no aplicativo. Para dúvidas sobre privacidade, escreva para <a href="mailto:nekumagrupo@gmail.com">nekumagrupo@gmail.com</a>.</p>
+          <p>Podemos atualizar esta política para refletir mudanças no produto ou na legislação. Alterações relevantes serão comunicadas no aplicativo. Para dúvidas sobre privacidade, escreva para <a href="mailto:suporte@nekumafinance.app">suporte@nekumafinance.app</a>.</p>
         </section>
       </article>
     </main>
     <footer class="legal-footer"><span>©2026 Nekuma Finance</span><nav><a href="./privacy.html">Privacidade</a><a href="./terms.html">Termos</a></nav></footer>
+    <script src="./i18n.js?v=266"></script>
+    <script>
+      document.querySelectorAll("a[href]").forEach((link) => {
+        link.href = window.NekumaI18n.publicUrl(link.getAttribute("href"));
+      });
+    </script>
   </body>
 </html>

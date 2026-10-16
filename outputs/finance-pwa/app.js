@@ -441,7 +441,7 @@
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./service-worker.js?v=265")
+      navigator.serviceWorker.register("./service-worker.js?v=266")
         .then((registration) => registration.update().catch(() => {}))
         .catch(() => {});
     });
@@ -501,7 +501,7 @@
       return;
     }
     if (action === "go-landing") {
-      window.location.href = "./index.html";
+      window.location.href = i18n?.publicUrl("./index.html") || "./index.html";
       return;
     }
     if (action === "request-password-reset") {
@@ -1060,7 +1060,7 @@
         remoteSession.status = "signedOut";
         render();
         window.alert("Cadastro efetuado com sucesso. Confirme seu email e depois faça login.");
-        window.location.href = "./index.html";
+        window.location.href = i18n?.publicUrl("./index.html") || "./index.html";
         return;
       }
 
@@ -1070,7 +1070,7 @@
       remoteSession.user = null;
       render();
       window.alert("Cadastro efetuado com sucesso.");
-      window.location.href = "./index.html";
+      window.location.href = i18n?.publicUrl("./index.html") || "./index.html";
     } catch (error) {
       remoteSession.status = "signedOut";
       remoteSession.error = error.message || "Nao foi possivel criar a conta.";
