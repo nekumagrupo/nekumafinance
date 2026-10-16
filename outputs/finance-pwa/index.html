@@ -3,7 +3,9 @@
   <head>
     <meta charset="utf-8" />
     <script>
-      if (!new URLSearchParams(window.location.search).has("home") && (window.location.hostname === "app.nekumafinance.app" || window.matchMedia("(display-mode: standalone)").matches || navigator.standalone)) {
+      if (["nekumafinance.app", "app.nekumafinance.app"].includes(window.location.hostname) && /(?:^#|&)(?:access_token|refresh_token|type=recovery)=?/.test(window.location.hash)) {
+        window.location.replace("https://app.nekumafinance.app/app" + window.location.search + window.location.hash);
+      } else if (!new URLSearchParams(window.location.search).has("home") && (window.location.hostname === "app.nekumafinance.app" || window.matchMedia("(display-mode: standalone)").matches || navigator.standalone)) {
         window.location.replace("./app.html" + (window.location.search || "?auth=login") + window.location.hash);
       }
     </script>

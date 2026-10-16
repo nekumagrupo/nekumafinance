@@ -9,6 +9,7 @@ const files = [
   "outputs/finance-pwa/assistant.js",
   "functions/api/binance.js",
   "functions/api/ai.js",
+  "functions/_middleware.js",
   "outputs/finance-pwa/service-worker.js",
   "scripts/build-deploy.cjs",
   "scripts/build-metamask-connect.cjs",

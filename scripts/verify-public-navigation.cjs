@@ -35,4 +35,9 @@ vm.runInNewContext(inline, {
   navigator: {}, URLSearchParams
 });
 assert.equal(destination, './app.html?auth=reset&code=example#example');
+vm.runInNewContext(inline, {
+  window: { location: { hostname: 'nekumafinance.app', search: '', hash: '#access_token=test&type=recovery', replace: url => { destination = url; } }, matchMedia: () => ({ matches: false }) },
+  navigator: {}, URLSearchParams
+});
+assert.equal(destination, 'https://app.nekumafinance.app/app#access_token=test&type=recovery');
 console.log('PASS: official hosts, language handoff, local preview, external links and recovery parameters.');
