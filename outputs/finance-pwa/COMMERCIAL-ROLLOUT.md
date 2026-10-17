@@ -326,3 +326,37 @@ commercial UI tests and production build. No real email was sent or token create
 API references checked 2026-10-17:
 https://www.resend.com/docs/api-reference/usage/retrieve-usage
 https://supabase.com/docs/reference/api/v1-get-project-usage-api-count
+
+## Infrastructure and Delivery Monitor Follow-up
+
+Production returned HTTP 503 from the top-level catch before provider results.
+Root defect in the previous implementation: fetch used `redirect: 'error'`, which
+workerd rejects (Request::Redirect only supports FOLLOW/MANUAL). Replaced both
+calls with manual redirects. Non-2xx responses remain denied; credentials are
+never forwarded to redirect destinations. Regression mocks now enforce the
+workerd redirect constraint rather than accepting arbitrary Node RequestInit.
+No 2FA or ADMIN protection was removed. Production verification is pending deploy.
+Runtime source: https://github.com/cloudflare/workerd/blob/main/src/workerd/api/http.h
+
+Added GET /emails/metrics for the last 15 inclusive UTC dates: sent, delivered,
+bounced, complained, failed and provider-returned delivery/bounce/complaint rates.
+Only totals are exposed; no recipient/domain-level message contents or IDs.
+Usage quota collection remains separate from deliverability collection and can
+fail independently. Missing rates stay unavailable; zero sends has no rate.
+
+Added Management API metrics scrape (Prometheus) with an allowlist parser for
+memory, mounted disk, connections and CPU counters. Host disk includes system
+files and is NOT the plan's database quota. RAM uses MemAvailable/MemTotal. CPU
+uses delta between two samples on the same warm function instance, excludes guest
+double counting and rejects resets/old samples. It is unavailable on first/cold
+collection or unsupported series. No persistent history or monitoring tables
+were created. Cluster/WAL breakdowns and exact dashboard chart replication are
+not implemented. Missing connection limits or series are never guessed.
+
+Additional scoped token permission needed: `analytics_logs_read` (Logs Read),
+alongside `analytics_usage_read`. Owner explicitly authorized preparing this
+scope on 2026-10-17; final token generation and Cloudflare secret replacement
+are handed to the owner. Existing credentials/tokens were not deleted.
+Tests: `node scripts/verify-admin-usage.cjs`,
+`node scripts/verify-infrastructure.cjs`, `npm run check` and build.
+Tests use HTTP/Prometheus fixtures, not live provider credentials.

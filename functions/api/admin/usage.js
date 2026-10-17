@@ -1,3 +1,4 @@
+import { infrastructureSnapshot } from '../../_shared/infrastructure.js';
 const json = (body, status = 200) => new Response(JSON.stringify(body), {
   status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' }
 });
@@ -19,7 +20,7 @@ async function cached(key, read) {
   return value;
 }
 async function providerJson(url, token) {
-  const response = await fetch(url, { headers: { Authorization: 'Bearer ' + token }, signal: AbortSignal.timeout(10000), redirect: 'error' });
+  const response = await fetch(url, { headers: { Authorization: 'Bearer ' + token }, signal: AbortSignal.timeout(10000), redirect: 'manual' });
   if (!response.ok) return { error: response.status === 401 || response.status === 403 ? 'credential_permissions' : 'provider_unavailable' };
   const text = await response.text();
   if (text.length > 2000000) return { error: 'invalid_response' };
@@ -38,7 +39,7 @@ export async function onRequest({ request, env }) {
     // RPC verifies JWT, live ADMIN allowlist and AAL2 before any provider/cache read.
     const allowed = await fetch(base + '/rest/v1/rpc/commercial_admin_overview', {
       method: 'POST', headers: { Authorization: authorization, apikey: anonKey, 'Content-Type': 'application/json' },
-      body: '{"page_number":0}', signal: AbortSignal.timeout(10000), redirect: 'error'
+      body: '{"page_number":0}', signal: AbortSignal.timeout(10000), redirect: 'manual'
     });
     if (!allowed.ok) {
       if (allowed.status === 401) return json({ error: 'Supabase recusou a sessao ou a chave publica configurada no Cloudflare. Entre novamente e confira o projeto dos secrets.' },401);
@@ -50,7 +51,8 @@ export async function onRequest({ request, env }) {
     const unavailable = reason => ({ connected: false, reason });
     let resend = unavailable('not_configured'), supabase = unavailable('not_configured');
     // Keep the monitor key separate from support/SMTP sending credentials.
-    const resendKey = env.RESEND_USAGE_API_KEY;
+    const resendKey = (env.RESEND_USAGE_API_KEY || '').trim();
+    const metricsToken = (env.SUPABASE_USAGE_TOKEN || '').trim();
     if (resendKey) resend = await cached('resend:' + (env.USAGE_CACHE_VERSION || '1'), async () => {
       try {
         const result = await providerJson('https://api.resend.com/usage', resendKey);
@@ -60,9 +62,37 @@ export async function onRequest({ request, env }) {
         return { connected: true, measuredAt: new Date().toISOString(), daily, monthly };
       } catch { return unavailable('provider_unavailable'); }
     });
-    if (env.SUPABASE_USAGE_TOKEN && /^[a-z0-9]{20}$/.test(ref)) supabase = await cached('supabase:' + ref + ':' + (env.USAGE_CACHE_VERSION || '1'), async () => {
+    let emailMetrics = unavailable('not_configured'), infrastructure = unavailable('not_configured');
+    if (resendKey) emailMetrics = await cached('resend-metrics:' + (env.USAGE_CACHE_VERSION || '1'), async () => {
       try {
-        const result = await providerJson('https://api.supabase.com/v1/projects/' + ref + '/analytics/endpoints/usage.api-counts', env.SUPABASE_USAGE_TOKEN);
+        const end = new Date(), start = new Date(end); start.setUTCDate(start.getUTCDate() - 14);
+        const endpoint = new URL('https://api.resend.com/emails/metrics');
+        endpoint.searchParams.set('start_date',start.toISOString().slice(0,10));
+        endpoint.searchParams.set('end_date',end.toISOString().slice(0,10));
+        endpoint.searchParams.set('metrics','sent,delivered,bounced,complained,failed,delivery_rate,bounce_rate,complaint_rate');
+        const result = await providerJson(endpoint.href,resendKey);
+        if (result.error) return unavailable(result.error);
+        const totals = {};
+        for (const key of ['sent','delivered','bounced','complained','failed','delivery_rate','bounce_rate','complaint_rate']) totals[key] = count(result.data.totals?.[key]);
+        if (Object.values(totals).every(value => value === null)) return unavailable('no_data');
+        return { connected: true, measuredAt: new Date().toISOString(), from: endpoint.searchParams.get('start_date'), to: endpoint.searchParams.get('end_date'), totals };
+      } catch { return unavailable('provider_unavailable'); }
+    });
+    if (metricsToken && /^[a-z0-9]{20}$/.test(ref)) infrastructure = await cached('infrastructure:' + ref + ':' + (env.USAGE_CACHE_VERSION || '1'), async () => {
+      try {
+        const response = await fetch('https://api.supabase.com/v1/projects/' + ref + '/analytics/endpoints/metrics', {
+          headers: { Authorization: 'Bearer ' + metricsToken }, signal: AbortSignal.timeout(10000), redirect: 'manual'
+        });
+        if (!response.ok) return unavailable(response.status === 401 || response.status === 403 ? 'infrastructure_permissions' : 'provider_unavailable');
+        const text = await response.text();
+        if (text.length > 2000000) return unavailable('invalid_response');
+        const data = infrastructureSnapshot(text,ref);
+        return data.available ? { connected: true, measuredAt: new Date().toISOString(), ...data } : unavailable('no_data');
+      } catch { return unavailable('provider_unavailable'); }
+    });
+    if (metricsToken && /^[a-z0-9]{20}$/.test(ref)) supabase = await cached('supabase:' + ref + ':' + (env.USAGE_CACHE_VERSION || '1'), async () => {
+      try {
+        const result = await providerJson('https://api.supabase.com/v1/projects/' + ref + '/analytics/endpoints/usage.api-counts', metricsToken);
         if (result.error) return unavailable(result.error);
         if (!Array.isArray(result.data.result) || result.data.error || !result.data.result.length) return unavailable('no_data');
         const keys = ['total_auth_requests','total_realtime_requests','total_rest_requests','total_storage_requests'];
@@ -77,6 +107,6 @@ export async function onRequest({ request, env }) {
         return { connected: true, measuredAt: new Date().toISOString(), requests: totals, from: times[0] || null, to: times.at(-1) || null };
       } catch { return unavailable('provider_unavailable'); }
     });
-    return json({ measuredAt: new Date().toISOString(), cacheSeconds: 300, databaseBytes: count(overview.databaseBytes), resend, supabase });
+    return json({ measuredAt: new Date().toISOString(), cacheSeconds: 300, databaseBytes: count(overview.databaseBytes), resend, supabase, infrastructure, emailMetrics });
   } catch { return json({ error: 'Monitoramento indisponivel. Tente novamente.' }, 503); }
 }

@@ -29,13 +29,14 @@ assert.match(adminSource,/detectSessionInUrl:false/);
 assert.match(adminSource,/signOut\(\{scope:'local'\}\)/);
 
 function element(){return {hidden:true,open:false,textContent:'',disabled:false,value:'',children:[],events:{},classList:{add(){}},append(...items){this.children.push(...items)},replaceChildren(...items){this.children=items},addEventListener(name,cb){this.events[name]=cb},setAttribute(){},removeAttribute(){},showModal(){this.open=true},close(){this.open=false;this.events.close?.()},querySelector(){return element()}};}
-async function adminCase(access,overviewError,{session=true,databaseBytes=450000000,isAdminUser=true}={}){
+async function adminCase(access,overviewError,{session=true,databaseBytes=450000000,isAdminUser=true,live=false}={}){
   const nodes=new Map();const get=id=>{if(!nodes.has(id))nodes.set(id,element());return nodes.get(id)};
   const calls=[],requests=[];
   const client={auth:{onAuthStateChange(){},async getSession(){return {data:{session:session?{user:{id:'test'}}:null}}},async signOut(options){assert.equal(options.scope,'local');return {}},async resetPasswordForEmail(email,options){requests.push({email,...options});return {}},mfa:{async getAuthenticatorAssuranceLevel(){return {data:{currentLevel:'aal2'}}}}},async rpc(name,args){calls.push(name);requests.push({name,args});if(name==='my_commercial_access')return {data:access};if(overviewError)return {error:overviewError};if(name==='commercial_admin_user_detail')return {data:{name:'Test user',version:'version-1',audit:[]}};if(name==='commercial_admin_edit_user')return {};if(name==='commercial_admin_recovery_target')return {data:'verified@example.com'};return {data:{users:1,paid:0,trials:1,households:1,financialStateBytes:1024,rows:[{id:'test',email:'<img src=x onerror=alert(1)>',plan:'free',status:'free'}]}}}};
   const originalRpc=client.rpc.bind(client);
+  if(live)client.auth.getSession=async()=>({data:{session:{user:{id:'test',email:'admin@example.invalid'},access_token:'test-session'}}});
   client.rpc=async(name,args)=>{const result=await originalRpc(name,args);if(name==='commercial_admin_overview'&&result.data){result.data.databaseBytes=databaseBytes;result.data.rows[0].is_admin=isAdminUser;}return result;};
-  const context={document:{getElementById:get,createElement:element},window:{confirm:()=>true,PONTE_SUPABASE_CONFIG:{url:'https://example.com',anonKey:'public'},supabase:{createClient:(url,key,options)=>{assert.equal(options.auth.storageKey,'nekuma-admin-auth-v1');return client}}},Date,Number,String,encodeURIComponent};
+  const context={fetch:async()=>({ok:true,async json(){return {resend:{connected:true,measuredAt:'2026-10-17',daily:{used:3,limit:100},monthly:{used:3,limit:3000}},supabase:{connected:false,reason:'not_configured'},infrastructure:{connected:true,measuredAt:'2026-10-17',cpuWaiting:true,memory:{used:500,total:1000,percent:50},disk:{used:100,total:2000,percent:5,mount:'/'},connections:{used:8,total:60}},emailMetrics:{connected:true,measuredAt:'2026-10-17',from:'2026-10-03',to:'2026-10-17',totals:{sent:3,delivered:3,bounced:0,complained:0,failed:0,delivery_rate:100,bounce_rate:0,complaint_rate:0}}}}}),document:{getElementById:get,createElement:element},window:{confirm:()=>true,PONTE_SUPABASE_CONFIG:{url:'https://example.com',anonKey:'public'},supabase:{createClient:(url,key,options)=>{assert.equal(options.auth.storageKey,'nekuma-admin-auth-v1');return client}}},Date,Number,String,encodeURIComponent};
   vm.runInNewContext(fs.readFileSync('outputs/finance-pwa/admin.js','utf8'),context);
   await new Promise(resolve=>setImmediate(resolve));
   return {nodes,calls,requests};
@@ -64,5 +65,11 @@ async function adminCase(access,overviewError,{session=true,databaseBytes=450000
   const missing=await adminCase({isAdmin:true},null,{databaseBytes:null,isAdminUser:false});
   assert.equal(missing.nodes.get('metrics').children[5].children[1].textContent,'Indisponivel / 500 MB');
   assert.equal(missing.nodes.get('users').children[0].children[0].children.length,0);
+  const connected=await adminCase({isAdmin:true},null,{live:true});
+  assert.equal(connected.nodes.get('service-usage').children.length,5);
+  const infraText=connected.nodes.get('service-usage').children[3].children.map(node=>node.textContent).join(' ');
+  assert.match(infraText,/aguardando duas coletas/);assert.match(infraText,/Conexoes: 8 \/ 60/);
+  const emailText=connected.nodes.get('service-usage').children[4].children.map(node=>node.textContent).join(' ');
+  assert.match(emailText,/Enviados: 3/);assert.match(emailText,/Taxa de entrega: 100.0%/);
   console.log('PASS: plan catalog, no browser self-upgrade, admin deny/allow/error and safe text rendering. SQL runtime requires staging.');
 })();

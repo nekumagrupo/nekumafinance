@@ -91,6 +91,19 @@
       else note(sections[2],reasons[live.resend?.reason]||'Consulta indisponivel.');
       if(live.supabase?.connected){title(sections[1],'Supabase · Requisicoes do projeto');for(const [key,label] of [['total_auth_requests','Auth'],['total_rest_requests','Banco/API'],['total_realtime_requests','Realtime'],['total_storage_requests','Storage/API']]){const value=live.supabase.requests?.[key];note(sections[1],label+': '+(typeof value==='number'?value.toLocaleString('pt-BR'):'Indisponivel'));}note(sections[1],'Janela: '+(live.supabase.from?new Date(live.supabase.from).toLocaleString('pt-BR'):'--')+' a '+(live.supabase.to?new Date(live.supabase.to).toLocaleString('pt-BR'):'--')+'. Requisicoes nao equivalem a MB de trafego, arquivos ou usuarios ativos mensais.');}
       else note(sections[1],reasons[live.supabase?.reason]||'Consulta indisponivel.');
+      const infra=document.createElement('section');infra.className='service-usage-item';title(infra,'Supabase · Infraestrutura');$('service-usage').append(infra);
+      if(live.infrastructure?.connected){
+        const data=live.infrastructure,percent=value=>typeof value==='number'&&Number.isFinite(value)?value.toFixed(1)+'%':'Indisponivel',gb=value=>(value/1000000000).toFixed(2)+' GB';
+        note(infra,'CPU: '+percent(data.cpu?.percent)+(data.cpu?' · media de '+Math.round(data.cpu.seconds)+' segundos':data.cpuWaiting?' · aguardando duas coletas no mesmo servidor':'') );
+        note(infra,'RAM: '+percent(data.memory?.percent)+(data.memory?' · '+gb(data.memory.used)+' / '+gb(data.memory.total):''));
+        note(infra,'Disco: '+percent(data.disk?.percent)+(data.disk?' · '+gb(data.disk.used)+' / '+gb(data.disk.total)+' · montagem '+data.disk.mount:''));
+        note(infra,'Conexoes: '+(data.connections?data.connections.used+' / '+(data.connections.total??'limite indisponivel'):'Indisponivel'));
+        if([data.cpu?.percent,data.memory?.percent,data.disk?.percent].some(value=>value>=80)){infra.classList.add('usage-warning');note(infra,'Atencao: recurso em 80% ou mais. Confira a infraestrutura no Supabase.');}
+        note(infra,'Coleta: '+new Date(data.measuredAt).toLocaleString('pt-BR')+'. Disco inclui arquivos do sistema; nao e a franquia de dados do plano. CPU depende de duas amostras e pode ficar indisponivel em uma nova instancia do monitor.');
+      }else note(infra,live.infrastructure?.reason==='infrastructure_permissions'?'O token precisa de Logs — Read para consultar a Metrics API. Usage Analytics — Read sozinho nao autoriza infraestrutura.':reasons[live.infrastructure?.reason]||'Infraestrutura indisponivel.');
+      const emails=document.createElement('section');emails.className='service-usage-item';title(emails,'Resend · Entregabilidade (15 dias)');$('service-usage').append(emails);
+      if(live.emailMetrics?.connected){const data=live.emailMetrics,totals=data.totals;for(const [key,label] of [['sent','Enviados'],['delivered','Entregues'],['bounced','Devolvidos'],['complained','Reclamacoes'],['failed','Falhas']])note(emails,label+': '+(totals[key]??'Indisponivel'));for(const [key,label] of [['delivery_rate','Taxa de entrega'],['bounce_rate','Taxa de devolucao'],['complaint_rate','Taxa de reclamacao']])note(emails,label+': '+(totals.sent===0?'Sem envios':typeof totals[key]==='number'&&totals[key]<=100?totals[key].toFixed(1)+'%':'Indisponivel'));note(emails,'Periodo UTC: '+data.from+' a '+data.to+'. Medido em '+new Date(data.measuredAt).toLocaleString('pt-BR'));}
+      else note(emails,reasons[live.emailMetrics?.reason]||'Metricas de entrega indisponiveis.');
       statusNode.textContent='Consulta concluida. Cache de ate 5 minutos; indicadores ausentes nao sao considerados zero.';
     }catch{if(epoch===sessionEpoch)statusNode.textContent='Monitoramento nao conectado. Publique a funcao no Cloudflare e confira os secrets de consulta.';}
   }
