@@ -353,6 +353,14 @@ collection or unsupported series. No persistent history or monitoring tables
 were created. Cluster/WAL breakdowns and exact dashboard chart replication are
 not implemented. Missing connection limits or series are never guessed.
 
+Admin monitor visual follow-up: service sections are repeated responsive cards.
+Infrastructure uses percentage bars and known connection-capacity bars; requests
+and delivery totals use comparative bars (not quota percentages). Missing CPU or
+connection data never becomes a zero bar. No history is fabricated. The existing
+5-minute provider cache and ADMIN/AAL2 checks are unchanged. Visual desktop/mobile
+QA used the optional `ADMIN_CHART_FIXTURE=1` commercial test artifact with clearly
+labeled simulated data, served only on localhost; no real account was changed.
+
 Additional scoped token permission needed: `analytics_logs_read` (Logs Read),
 alongside `analytics_usage_read`. Owner explicitly authorized preparing this
 scope on 2026-10-17; final token generation and Cloudflare secret replacement

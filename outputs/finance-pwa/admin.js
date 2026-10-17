@@ -66,6 +66,15 @@
     });
   }
   function editorStatus(message){$('editor-status').textContent=message;}
+  function metricBar(section,label,value,maximum,display,tone='green'){
+    const row=document.createElement('div'),head=document.createElement('div'),name=document.createElement('span'),amount=document.createElement('strong');
+    row.className='metric-chart-row tone-'+tone;head.className='metric-chart-label';name.textContent=label;amount.textContent=display;head.append(name,amount);row.append(head);
+    if(typeof value==='number'&&Number.isFinite(value)&&value>=0&&typeof maximum==='number'&&maximum>0){
+      const bar=document.createElement('progress');bar.max=maximum;bar.value=Math.min(value,maximum);bar.setAttribute('aria-label',label+': '+display);row.append(bar);
+      if(['CPU','RAM','Disco'].includes(label)&&value>=80)row.classList.add('chart-warning');
+    }else row.classList.add('chart-unavailable');
+    section.append(row);
+  }
   async function loadServiceUsage(epoch){
     const statusNode=$('service-live-status');statusNode.textContent='Consultando indicadores dos provedores...';
     try{
@@ -89,20 +98,21 @@
       };
       if(live.resend?.connected){title(sections[2],'Resend · Consumo real da conta');meter(sections[2],'Hoje',live.resend.daily);meter(sections[2],'Mes',live.resend.monthly);note(sections[2],'Medido em '+new Date(live.resend.measuredAt).toLocaleString('pt-BR'));}
       else note(sections[2],reasons[live.resend?.reason]||'Consulta indisponivel.');
-      if(live.supabase?.connected){title(sections[1],'Supabase · Requisicoes do projeto');for(const [key,label] of [['total_auth_requests','Auth'],['total_rest_requests','Banco/API'],['total_realtime_requests','Realtime'],['total_storage_requests','Storage/API']]){const value=live.supabase.requests?.[key];note(sections[1],label+': '+(typeof value==='number'?value.toLocaleString('pt-BR'):'Indisponivel'));}note(sections[1],'Janela: '+(live.supabase.from?new Date(live.supabase.from).toLocaleString('pt-BR'):'--')+' a '+(live.supabase.to?new Date(live.supabase.to).toLocaleString('pt-BR'):'--')+'. Requisicoes nao equivalem a MB de trafego, arquivos ou usuarios ativos mensais.');}
+      if(live.supabase?.connected){title(sections[1],'Supabase · Requisicoes do projeto');const max=Math.max(1,...Object.values(live.supabase.requests||{}).filter(value=>typeof value==='number'));for(const [key,label] of [['total_auth_requests','Auth'],['total_rest_requests','Banco/API'],['total_realtime_requests','Realtime'],['total_storage_requests','Storage/API']]){const value=live.supabase.requests?.[key];metricBar(sections[1],label,value,max,typeof value==='number'?value.toLocaleString('pt-BR'):'Indisponivel','blue');}note(sections[1],'Janela: '+(live.supabase.from?new Date(live.supabase.from).toLocaleString('pt-BR'):'--')+' a '+(live.supabase.to?new Date(live.supabase.to).toLocaleString('pt-BR'):'--')+'. Barras comparativas; nao representam franquia de trafego.');}
       else note(sections[1],reasons[live.supabase?.reason]||'Consulta indisponivel.');
-      const infra=document.createElement('section');infra.className='service-usage-item';title(infra,'Supabase · Infraestrutura');$('service-usage').append(infra);
+      const infra=document.createElement('section');infra.className='service-usage-item infrastructure-charts';title(infra,'Supabase · Infraestrutura');$('service-usage').append(infra);
       if(live.infrastructure?.connected){
         const data=live.infrastructure,percent=value=>typeof value==='number'&&Number.isFinite(value)?value.toFixed(1)+'%':'Indisponivel',gb=value=>(value/1000000000).toFixed(2)+' GB';
-        note(infra,'CPU: '+percent(data.cpu?.percent)+(data.cpu?' · media de '+Math.round(data.cpu.seconds)+' segundos':data.cpuWaiting?' · aguardando duas coletas no mesmo servidor':'') );
-        note(infra,'RAM: '+percent(data.memory?.percent)+(data.memory?' · '+gb(data.memory.used)+' / '+gb(data.memory.total):''));
-        note(infra,'Disco: '+percent(data.disk?.percent)+(data.disk?' · '+gb(data.disk.used)+' / '+gb(data.disk.total)+' · montagem '+data.disk.mount:''));
-        note(infra,'Conexoes: '+(data.connections?data.connections.used+' / '+(data.connections.total??'limite indisponivel'):'Indisponivel'));
+        metricBar(infra,'CPU',data.cpu?.percent,100,percent(data.cpu?.percent),'blue');
+        if(data.cpuWaiting)note(infra,'CPU aguardando duas coletas no mesmo servidor.');
+        metricBar(infra,'RAM',data.memory?.percent,100,percent(data.memory?.percent)+(data.memory?' · '+gb(data.memory.used)+' / '+gb(data.memory.total):''),'blue');
+        metricBar(infra,'Disco',data.disk?.percent,100,percent(data.disk?.percent)+(data.disk?' · '+gb(data.disk.used)+' / '+gb(data.disk.total):''),'amber');
+        metricBar(infra,'Conexoes',data.connections?.used,data.connections?.total,data.connections?data.connections.used+' / '+(data.connections.total??'limite indisponivel'):'Indisponivel');
         if([data.cpu?.percent,data.memory?.percent,data.disk?.percent].some(value=>value>=80)){infra.classList.add('usage-warning');note(infra,'Atencao: recurso em 80% ou mais. Confira a infraestrutura no Supabase.');}
         note(infra,'Coleta: '+new Date(data.measuredAt).toLocaleString('pt-BR')+'. Disco inclui arquivos do sistema; nao e a franquia de dados do plano. CPU depende de duas amostras e pode ficar indisponivel em uma nova instancia do monitor.');
       }else note(infra,live.infrastructure?.reason==='infrastructure_permissions'?'O token precisa de Logs — Read para consultar a Metrics API. Usage Analytics — Read sozinho nao autoriza infraestrutura.':reasons[live.infrastructure?.reason]||'Infraestrutura indisponivel.');
       const emails=document.createElement('section');emails.className='service-usage-item';title(emails,'Resend · Entregabilidade (15 dias)');$('service-usage').append(emails);
-      if(live.emailMetrics?.connected){const data=live.emailMetrics,totals=data.totals;for(const [key,label] of [['sent','Enviados'],['delivered','Entregues'],['bounced','Devolvidos'],['complained','Reclamacoes'],['failed','Falhas']])note(emails,label+': '+(totals[key]??'Indisponivel'));for(const [key,label] of [['delivery_rate','Taxa de entrega'],['bounce_rate','Taxa de devolucao'],['complaint_rate','Taxa de reclamacao']])note(emails,label+': '+(totals.sent===0?'Sem envios':typeof totals[key]==='number'&&totals[key]<=100?totals[key].toFixed(1)+'%':'Indisponivel'));note(emails,'Periodo UTC: '+data.from+' a '+data.to+'. Medido em '+new Date(data.measuredAt).toLocaleString('pt-BR'));}
+      if(live.emailMetrics?.connected){const data=live.emailMetrics,totals=data.totals,max=Math.max(1,...['sent','delivered','bounced','complained','failed'].map(key=>totals[key]||0));for(const [key,label,tone] of [['sent','Enviados','blue'],['delivered','Entregues','green'],['bounced','Devolvidos','amber'],['complained','Reclamacoes','red'],['failed','Falhas','red']])metricBar(emails,label,totals[key],max,String(totals[key]??'Indisponivel'),tone);for(const [key,label] of [['delivery_rate','Taxa de entrega'],['bounce_rate','Taxa de devolucao'],['complaint_rate','Taxa de reclamacao']])note(emails,label+': '+(totals.sent===0?'Sem envios':typeof totals[key]==='number'&&totals[key]<=100?totals[key].toFixed(1)+'%':'Indisponivel'));note(emails,'Periodo UTC: '+data.from+' a '+data.to+'. Medido em '+new Date(data.measuredAt).toLocaleString('pt-BR'));}
       else note(emails,reasons[live.emailMetrics?.reason]||'Metricas de entrega indisponiveis.');
       statusNode.textContent='Consulta concluida. Cache de ate 5 minutos; indicadores ausentes nao sao considerados zero.';
     }catch{if(epoch===sessionEpoch)statusNode.textContent='Monitoramento nao conectado. Publique a funcao no Cloudflare e confira os secrets de consulta.';}
