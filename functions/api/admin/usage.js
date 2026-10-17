@@ -31,15 +31,20 @@ export async function onRequest({ request, env }) {
   if (!['nekumafinance.app', 'admin.nekumafinance.app'].includes(url.hostname) || request.headers.get('Origin') !== url.origin) return json({ error: 'Forbidden' }, 403);
   const authorization = request.headers.get('Authorization') || '';
   if (!/^Bearer [A-Za-z0-9._-]+$/.test(authorization)) return json({ error: 'Authentication required' }, 401);
-  const base = (env.SUPABASE_URL || '').replace(/\/$/, '');
-  if (!base || !env.SUPABASE_ANON_KEY) return json({ error: 'Configuracao indisponivel.' }, 503);
+  const base = (env.SUPABASE_URL || '').trim().replace(/\/$/, '');
+  const anonKey = (env.SUPABASE_ANON_KEY || '').trim();
+  if (!base || !anonKey) return json({ error: 'SUPABASE_URL ou SUPABASE_ANON_KEY ausente no ambiente desta implantacao.' }, 503);
   try {
     // RPC verifies JWT, live ADMIN allowlist and AAL2 before any provider/cache read.
     const allowed = await fetch(base + '/rest/v1/rpc/commercial_admin_overview', {
-      method: 'POST', headers: { Authorization: authorization, apikey: env.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+      method: 'POST', headers: { Authorization: authorization, apikey: anonKey, 'Content-Type': 'application/json' },
       body: '{"page_number":0}', signal: AbortSignal.timeout(10000), redirect: 'error'
     });
-    if (!allowed.ok) return json({ error: 'Acesso exige ADMIN e autenticador 2FA.' }, allowed.status === 401 ? 401 : 403);
+    if (!allowed.ok) {
+      if (allowed.status === 401) return json({ error: 'Supabase recusou a sessao ou a chave publica configurada no Cloudflare. Entre novamente e confira o projeto dos secrets.' },401);
+      if (allowed.status === 403) return json({ error: 'Acesso exige ADMIN e autenticador 2FA no projeto configurado no servidor.' },403);
+      return json({ error: 'Validacao administrativa indisponivel no Supabase (HTTP '+allowed.status+').' },503);
+    }
     const overview = await allowed.json();
     const ref = new URL(base).hostname.split('.')[0];
     const unavailable = reason => ({ connected: false, reason });

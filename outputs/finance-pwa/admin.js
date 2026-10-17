@@ -74,7 +74,7 @@
       if(error||!data?.session?.access_token){statusNode.textContent='Sessao de monitoramento indisponivel.';return;}
       const response=await fetch('/api/admin/usage',{method:'POST',headers:{Authorization:'Bearer '+data.session.access_token},cache:'no-store'});
       if(epoch!==sessionEpoch)return;
-      if(!response.ok){statusNode.textContent=response.status===404?'Publique a funcao de monitoramento no Cloudflare para conectar os indicadores.':'Nao foi possivel consultar os provedores. Confira ADMIN/2FA e a configuracao.';return;}
+      if(!response.ok){let message='';try{const failure=await response.json();message=typeof failure.error==='string'?failure.error.slice(0,240):'';}catch{}if(epoch!==sessionEpoch)return;statusNode.textContent=response.status===404?'Publique a funcao de monitoramento no Cloudflare para conectar os indicadores.':'Monitoramento HTTP '+response.status+': '+(message||'Resposta indisponivel. Confira a configuracao do servidor.');return;}
       const live=await response.json();
       if(epoch!==sessionEpoch)return;
       const sections=$('service-usage').children;
