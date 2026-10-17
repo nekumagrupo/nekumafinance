@@ -13064,3 +13064,4 @@ body[data-workspace-theme] .tab-card-columns .content-panel {
   .guided-tutorial-card .tutorial-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .guided-tutorial-card button { padding: 10px 6px; font-size: 13px; }
 }
+.plan-resource-lock{display:flex;align-items:center;gap:12px;max-width:100%;padding:12px 0;flex-wrap:wrap}.plan-resource-lock>svg{width:20px;height:20px;flex:0 0 20px}.plan-resource-lock>div{flex:1 1 140px;min-width:0}.plan-resource-lock strong{font-size:14px;overflow-wrap:anywhere}.plan-resource-lock p{font-size:12px;line-height:1.5;margin:6px 0;opacity:.8}.workspace-metric .plan-resource-lock{padding:0;gap:6px}.workspace-metric .plan-resource-lock p{display:none}.workspace-metric .plan-resource-lock strong{font-size:12px}.workspace-metric .plan-resource-lock .small-action{font-size:11px;padding:4px 8px;min-height:28px}

@@ -3,6 +3,7 @@ const { spawnSync } = require("child_process");
 const files = [
   "outputs/finance-pwa/app.js",
   "outputs/finance-pwa/home.js",
+  "outputs/finance-pwa/admin.js",
   "outputs/finance-pwa/i18n.js",
   "outputs/finance-pwa/dashboard.js",
   "outputs/finance-pwa/metamask.js",
@@ -11,6 +12,9 @@ const files = [
   "outputs/finance-pwa/assistant.js",
   "functions/api/binance.js",
   "functions/api/ai.js",
+  "functions/api/receipt-scan.js",
+  "functions/_shared/commercial.js",
+  "functions/api/admin/delete-user.js",
   "functions/_middleware.js",
   "outputs/finance-pwa/service-worker.js",
   "scripts/build-deploy.cjs",

@@ -1,3 +1,4 @@
+import { commercialAccess } from '../_shared/commercial.js';
 const DEFAULT_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8";
 const DEFAULT_DAILY_LIMIT = 3;
 const MAX_BODY_BYTES = 50000;
@@ -50,6 +51,8 @@ export async function onRequest({ request, env }) {
   if (!auth?.ok) return json({ error: "Sua sessão expirou. Entre novamente no Nekuma." }, 401);
   const user = await auth.json().catch(() => ({}));
   if (!user.id) return json({ error: "Sessão inválida." }, 401);
+  const access = await commercialAccess(env, authorization);
+  if (access.error) return json({ error: access.error }, access.status);
 
   const bodyText = await request.text();
   if (new TextEncoder().encode(bodyText).length > MAX_BODY_BYTES) return json({ error: "A solicitação excedeu o limite permitido." }, 413);

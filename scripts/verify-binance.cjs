@@ -2,7 +2,9 @@ const fs = require('node:fs');
 const assert = require('node:assert/strict');
 (async () => {
   const source = fs.readFileSync('functions/api/binance.js', 'utf8');
-  const api = await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'));
+  const bundled = require('esbuild').buildSync({ entryPoints: ['functions/api/binance.js'], bundle: true, write: false, format: 'esm', platform: 'neutral' }).outputFiles[0].text;
+  const api = await import('data:text/javascript;base64,' + Buffer.from(bundled).toString('base64'));
+  const access = () => api.json({ plan: 'pro', enforcementActive: true, limits: { features: ['binance'] } });
   const permissions = { enableReading: true, enableWithdrawals: false, enableInternalTransfer: false, enableMargin: false, enableFutures: false, permitsUniversalTransfer: false, enableVanillaOptions: false, enableFixApiTrade: false, enableSpotAndMarginTrading: false, enablePortfolioMarginTrading: false };
   api.assertReadOnly(permissions);
   for (const name of Object.keys(permissions).filter(name => name !== 'enableReading')) {
@@ -26,7 +28,7 @@ const assert = require('node:assert/strict');
   const originalFetch = global.fetch;
   let queriedUser = '';
   try {
-    global.fetch = async url => { assert.ok(String(url).endsWith('/auth/v1/user')); return api.json({ id: 'user-a' }); };
+    global.fetch = async url => { if(String(url).endsWith('/rest/v1/rpc/my_commercial_access')) return access(); assert.ok(String(url).endsWith('/auth/v1/user')); return api.json({ id: 'user-a' }); };
     const env = { SUPABASE_URL: 'https://auth.example.com', SUPABASE_ANON_KEY: 'public', BINANCE_ENCRYPTION_KEY: Buffer.alloc(32, 1).toString('base64'), BINANCE_DB: { prepare(sql) { return { bind(user) { queriedUser = user; return this; }, async first() { return null; }, async run() { return { meta: { changes: 1 } }; } }; } } };
     result = await api.onRequest({ request: new Request('https://example.com/api/binance', { headers: { Authorization: 'Bearer test' } }), env });
     assert.equal(queriedUser, 'user-a');
@@ -37,6 +39,7 @@ const assert = require('node:assert/strict');
     global.fetch = async (url, input = {}) => {
       const parsed = new URL(url);
       if (parsed.pathname === '/auth/v1/user') return api.json({ id: 'user-a' });
+      if (parsed.pathname === '/rest/v1/rpc/my_commercial_access') return access();
       assert.equal(input.method, 'GET');
       if (parsed.pathname === '/api/v3/time') return api.json({ serverTime: Date.now() });
       if (parsed.pathname.startsWith('/sapi/') || parsed.pathname === '/api/v3/account') {
@@ -59,7 +62,7 @@ const assert = require('node:assert/strict');
     assert.ok(!JSON.stringify(connected).includes(secret));
     const connectRequest = () => new Request('https://example.com/api/binance', { method: 'POST', headers: { Authorization: 'Bearer test', 'Content-Type': 'application/json' }, body: JSON.stringify({ apiKey: 'a'.repeat(64), apiSecret: secret }) });
     for (const [status, upstreamCode, expected] of [[451, 0, 'BINANCE_REGION_IP'], [400, -1022, 'BINANCE_SIGNATURE'], [401, -2015, 'BINANCE_KEY_IP_PERMISSIONS'], [429, 0, 'BINANCE_RATE_LIMIT']]) {
-      global.fetch = async url => String(url).endsWith('/auth/v1/user') ? api.json({ id: 'user-a' }) : api.json({ code: upstreamCode, msg: secret }, status);
+      global.fetch = async url => String(url).endsWith('/auth/v1/user') ? api.json({ id: 'user-a' }) : String(url).endsWith('/rest/v1/rpc/my_commercial_access') ? access() : api.json({ code: upstreamCode, msg: secret }, status);
       const failed = await api.onRequest({ request: connectRequest(), env });
       const text = await failed.text();
       assert.equal(JSON.parse(text).code, expected);

@@ -364,6 +364,54 @@
   Object.assign(messages["en-US"], { "Proximo": "Next", "Concluir": "Finish", "Botao +": "+ button", "Scan": "Receipt scan" });
   Object.assign(messages["ja-JP"], { "Proximo": "次へ", "Concluir": "完了", "Botao +": "＋ボタン", "Scan": "レシート読取" });
 
+  Object.assign(messages["en-US"], {
+    "Entrar em uma familia": "Join a family", "Convite de um assinante Familia": "Invitation from a Family subscriber",
+    "Conta bloqueada. Entre em contato com o suporte.": "Account blocked. Please contact support.",
+    "Informe seu nome.": "Enter your name.",
+    "Nao foi criado um novo cadastro. Tente entrar ou recuperar sua senha; se ainda nao confirmou seu email, confira sua caixa de entrada.": "No new account was created. Try signing in or resetting your password; if you have not verified your email, check your inbox.",
+    "Salvar familia": "Save family", "Gerar ou copiar convite": "Generate or copy invitation",
+    "Convites sao gerenciados pelo titular do plano Familia.": "Invitations are managed by the Family plan owner.",
+    "Familia salva.": "Family saved.", "Dados sincronizados": "Synced data",
+    "Apenas o titular do plano Familia pode gerar convites.": "Only the Family plan owner can generate invitations.",
+    "Apenas o titular do plano Familia pode gerenciar a familia.": "Only the Family plan owner can manage the family.",
+    "Recurso exclusivo do plano Familia.": "Available with the Family plan only.",
+    "Seu plano Familia esta ativo": "Your Family plan is active", "Seu plano PRO esta ativo": "Your PRO plan is active",
+    "Os recursos PRO e de conexao familiar foram liberados para sua conta.": "PRO features and family sharing are now available for your account.",
+    "Os recursos PRO foram liberados para sua conta.": "PRO features are now available for your account."
+  });
+  Object.assign(messages["ja-JP"], {
+    "Entrar em uma familia": "家族に参加", "Convite de um assinante Familia": "ファミリープラン契約者からの招待",
+    "Conta bloqueada. Entre em contato com o suporte.": "アカウントが停止されています。サポートにお問い合わせください。",
+    "Informe seu nome.": "お名前を入力してください。",
+    "Nao foi criado um novo cadastro. Tente entrar ou recuperar sua senha; se ainda nao confirmou seu email, confira sua caixa de entrada.": "新しいアカウントは作成されませんでした。ログインまたはパスワードの再設定をお試しください。メール未確認の場合は受信箱をご確認ください。",
+    "Salvar familia": "家族を保存", "Gerar ou copiar convite": "招待コードを発行・コピー",
+    "Convites sao gerenciados pelo titular do plano Familia.": "招待はファミリープランの契約者が管理します。",
+    "Familia salva.": "家族を保存しました。", "Dados sincronizados": "同期済みデータ",
+    "Apenas o titular do plano Familia pode gerar convites.": "招待コードはファミリープランの契約者のみ発行できます。",
+    "Apenas o titular do plano Familia pode gerenciar a familia.": "家族の管理はファミリープランの契約者のみ行えます。",
+    "Recurso exclusivo do plano Familia.": "ファミリープラン限定の機能です。",
+    "Seu plano Familia esta ativo": "ファミリープランが有効になりました", "Seu plano PRO esta ativo": "PROプランが有効になりました",
+    "Os recursos PRO e de conexao familiar foram liberados para sua conta.": "PRO機能と家族共有をご利用いただけます。",
+    "Os recursos PRO foram liberados para sua conta.": "PRO機能をご利用いただけます。"
+  });
+
+  Object.assign(messages["en-US"], {
+    "Disponivel no PRO e Familia. Seus dados existentes continuam salvos.": "Available with PRO and Family. Your existing data stays saved.",
+    "Ver planos": "View plans", "Seu plano": "Your plan", "Recurso PRO": "PRO feature",
+    "Graficos avancados": "Advanced charts", "Projecao salarial": "Salary forecast",
+    "Nao foi possivel validar seu plano. Tente atualizar o app.": "Your plan could not be verified. Try refreshing the app.",
+    "Limites ativos. Registros existentes sao preservados ao trocar de plano.": "Limits are active. Existing records are preserved when changing plans.",
+    "Ativacao dos limites no servidor pendente.": "Server plan enforcement is pending activation."
+  });
+  Object.assign(messages["ja-JP"], {
+    "Disponivel no PRO e Familia. Seus dados existentes continuam salvos.": "PRO・ファミリープランで利用できます。既存のデータは保存されます。",
+    "Ver planos": "プランを見る", "Seu plano": "ご利用プラン", "Recurso PRO": "PRO限定機能",
+    "Graficos avancados": "詳細グラフ", "Projecao salarial": "給与予測",
+    "Nao foi possivel validar seu plano. Tente atualizar o app.": "プランを確認できませんでした。アプリを再読み込みしてください。",
+    "Limites ativos. Registros existentes sao preservados ao trocar de plano.": "プランの利用制限が有効です。プラン変更後も既存の記録は保持されます。",
+    "Ativacao dos limites no servidor pendente.": "サーバー側の利用制限は有効化待ちです。"
+  });
+
   const foldedMessages = Object.fromEntries(Object.entries(messages).map(([locale, dictionary]) => [
     locale,
     Object.fromEntries(Object.entries(dictionary).map(([source, translation]) => [fold(source), translation]))

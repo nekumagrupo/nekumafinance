@@ -1,0 +1,59 @@
+const fs=require('node:fs');
+const assert=require('node:assert/strict');
+const vm=require('node:vm');
+const sql=fs.readFileSync('outputs/finance-pwa/supabase-commercial-v1.sql','utf8');
+const match=sql.match(/select '(\{[\s\S]*?\})'::jsonb;/);
+assert.ok(match,'Server plan catalog exists');
+const plans=JSON.parse(match[1]);
+assert.equal(plans.free.accounts,1);assert.equal(plans.free.incomeSources,1);
+assert.deepEqual(plans.free.charts,['monthly_comparison']);
+assert.ok(plans.free.features.includes('manual_crypto'));
+assert.ok(!plans.free.features.includes('metamask'));
+assert.equal(plans.pro.priceJPY,480);assert.equal(plans.family.priceJPY,850);
+assert.equal(plans.pro.scansMonthly,30);assert.equal(plans.family.scansMonthly,60);
+assert.equal(plans.family.members,5);assert.equal(plans.pro.accounts,null);
+assert.ok(!plans.pro.features.includes('family_xray'));assert.ok(plans.family.features.includes('family_xray'));
+assert.match(sql,/auth\.jwt\(\)->>'aal'/);assert.match(sql,/from public, anon, authenticated/);
+assert.match(sql,/on conflict\(event_key\) do nothing/);
+assert.match(sql,/new.created_at \+ interval '3 days'/);
+const app=fs.readFileSync('outputs/finance-pwa/app.js','utf8');
+assert.ok(!app.includes('state.commercial.plan = plan;'),'Browser cannot self-upgrade');
+assert.match(app,/rpc\("my_commercial_access"\)/);
+assert.ok(!app.includes('href="./admin.html"'),'No administration link in financial app');
+const adminHtml=fs.readFileSync('outputs/finance-pwa/admin.html','utf8');
+const adminSource=fs.readFileSync('outputs/finance-pwa/admin.js','utf8');
+assert.ok(!/href="\.\/app/.test(adminHtml),'Admin never links to financial app');
+assert.ok(!adminSource.includes('location.replace'),'Admin logout does not redirect');
+assert.match(adminSource,/storageKey:'nekuma-admin-auth-v1'/);
+assert.match(adminSource,/detectSessionInUrl:false/);
+assert.match(adminSource,/signOut\(\{scope:'local'\}\)/);
+
+function element(){return {hidden:true,open:false,textContent:'',disabled:false,value:'',children:[],events:{},append(...items){this.children.push(...items)},replaceChildren(...items){this.children=items},addEventListener(name,cb){this.events[name]=cb},setAttribute(){},removeAttribute(){},showModal(){this.open=true},close(){this.open=false;this.events.close?.()},querySelector(){return element()}};}
+async function adminCase(access,overviewError,{session=true}={}){
+  const nodes=new Map();const get=id=>{if(!nodes.has(id))nodes.set(id,element());return nodes.get(id)};
+  const calls=[],requests=[];
+  const client={auth:{onAuthStateChange(){},async getSession(){return {data:{session:session?{user:{id:'test'}}:null}}},async signOut(options){assert.equal(options.scope,'local');return {}},async resetPasswordForEmail(email,options){requests.push({email,...options});return {}},mfa:{async getAuthenticatorAssuranceLevel(){return {data:{currentLevel:'aal2'}}}}},async rpc(name,args){calls.push(name);requests.push({name,args});if(name==='my_commercial_access')return {data:access};if(overviewError)return {error:overviewError};if(name==='commercial_admin_user_detail')return {data:{name:'Test user',version:'version-1',audit:[]}};if(name==='commercial_admin_edit_user')return {};if(name==='commercial_admin_recovery_target')return {data:'verified@example.com'};return {data:{users:1,paid:0,trials:1,households:1,financialStateBytes:1024,rows:[{id:'test',email:'<img src=x onerror=alert(1)>',plan:'free',status:'free'}]}}}};
+  const context={document:{getElementById:get,createElement:element},window:{confirm:()=>true,PONTE_SUPABASE_CONFIG:{url:'https://example.com',anonKey:'public'},supabase:{createClient:(url,key,options)=>{assert.equal(options.auth.storageKey,'nekuma-admin-auth-v1');return client}}},Date,Number,String,encodeURIComponent};
+  vm.runInNewContext(fs.readFileSync('outputs/finance-pwa/admin.js','utf8'),context);
+  await new Promise(resolve=>setImmediate(resolve));
+  return {nodes,calls,requests};
+}
+(async()=>{
+  const denied=await adminCase({isAdmin:false});assert.equal(denied.nodes.get('access').hidden,false);assert.ok(!denied.calls.includes('commercial_admin_overview'));
+  const allowed=await adminCase({isAdmin:true});assert.equal(allowed.nodes.get('overview').hidden,false);assert.equal(allowed.nodes.get('users').children[0].children[2].textContent,'<img src=x onerror=alert(1)>');
+  assert.equal(allowed.nodes.get('metrics').children.length,6);
+  assert.equal(allowed.nodes.get('users').children[0].children.length,8);
+  await allowed.nodes.get('users').children[0].children[7].children[0].events.click();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(allowed.nodes.get('user-editor').open,true);
+  allowed.nodes.get('edit-name').value='Updated name';allowed.nodes.get('edit-reason').value='Support correction';allowed.nodes.get('edit-mode').value='keep';
+  await allowed.nodes.get('user-form').events.submit({preventDefault(){}});
+  assert.equal(allowed.requests.find(item=>item.name==='commercial_admin_edit_user').args.expected_version,'version-1');
+  await allowed.nodes.get('users').children[0].children[7].children[0].events.click();await new Promise(resolve=>setImmediate(resolve));
+  await allowed.nodes.get('send-recovery').events.click();
+  assert.equal(allowed.requests.find(item=>item.email)?.email,'verified@example.com','Recovery recipient is returned by server, not DOM');
+  await allowed.nodes.get('logout').events.click();assert.equal(allowed.nodes.get('login').hidden,false);assert.equal(allowed.nodes.get('users').children.length,0);
+  const loggedOut=await adminCase(null,null,{session:false});assert.equal(loggedOut.nodes.get('login').hidden,false);assert.equal(loggedOut.calls.length,0);
+  const failed=await adminCase({isAdmin:true},{message:'Administrator required',code:'42501'});assert.equal(failed.nodes.get('access').hidden,false);assert.equal(failed.nodes.get('overview').hidden,true);
+  console.log('PASS: plan catalog, no browser self-upgrade, admin deny/allow/error and safe text rendering. SQL runtime requires staging.');
+})();

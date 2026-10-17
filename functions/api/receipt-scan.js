@@ -1,3 +1,4 @@
+import { commercialAccess, reserveReceiptScan } from '../_shared/commercial.js';
 const VISION_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct";
 const MAX_BODY_BYTES = 2_000_000;
 
@@ -23,6 +24,8 @@ export async function onRequest({ request, env }) {
     headers: { Authorization: authorization, apikey: anonKey }, signal: AbortSignal.timeout(10000)
   }).catch(() => null);
   if (!auth?.ok) return json({ error: "Sua sessao expirou. Entre novamente no Nekuma." }, 401);
+  const access = await commercialAccess(env, authorization, 'receipt_scan');
+  if (access.error) return json({ error: access.error, code: access.code }, access.status);
 
   const bodyText = await request.text();
   if (new TextEncoder().encode(bodyText).length > MAX_BODY_BYTES) return json({ error: "A imagem ficou grande demais. Fotografe somente o recibo." }, 413);
@@ -30,6 +33,9 @@ export async function onRequest({ request, env }) {
   try { body = JSON.parse(bodyText); } catch { return json({ error: "Dados invalidos." }, 400); }
   const image = String(body?.image || "");
   if (!/^data:image\/(jpeg|png|webp);base64,/.test(image)) return json({ error: "Envie uma imagem JPG, PNG ou WebP." }, 400);
+  if (body.householdId && !/^[0-9a-f-]{36}$/i.test(body.householdId)) return json({ error: 'Familia invalida.' }, 400);
+  const reservation = await reserveReceiptScan(access, authorization, body.householdId);
+  if (reservation.error) return json({ error: reservation.error }, reservation.status);
 
   const prompt = `Leia este recibo de compra, inclusive se estiver em japones ou portugues. Extraia somente os dados essenciais e retorne SOMENTE um objeto JSON valido, sem markdown ou explicacoes:
 {"merchant":"","date":"YYYY-MM-DD ou vazio","currency":"JPY|BRL|USD|EUR","total":0,"paymentMethod":"cash|card|electronic_money|qr_wallet|bank_transfer|unknown","category":"","confidence":0}
@@ -65,7 +71,7 @@ Regras para recibos japoneses:
   if (!receipt) return json({ error: "A IA leu o recibo, mas nao conseguiu organizar os dados. Tente novamente." }, 502);
   const sanitized = sanitizeReceipt(receipt);
   if (!sanitized.merchant && sanitized.total <= 0) return json({ error: "A leitura nao encontrou loja nem valor total. Confira o enquadramento e tente novamente." }, 422);
-  return json({ receipt: sanitized });
+  return json({ receipt: sanitized, usage: reservation.usage });
 }
 
 function modelResponseValue(output) {

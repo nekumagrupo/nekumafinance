@@ -27,6 +27,7 @@
     return token;
   }
   async function request(method = 'GET', body, force = false) {
+    if (method !== 'DELETE' && !options?.allowed?.()) return;
     const token = await identity();
     if (!token) { data.error = 'Entre no app para conectar a Binance.'; paint(); return; }
     if (busy) return;

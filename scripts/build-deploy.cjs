@@ -11,6 +11,9 @@ const publicFiles = [
   "home.css",
   "home.js",
   "app.html",
+  "admin.html",
+  "admin.css",
+  "admin.js",
   "privacy.html",
   "terms.html",
   "clean.html",
@@ -81,10 +84,11 @@ function withVersion(fileName, content) {
   if (fileName === "metamask.js") {
     return content.replace(/metamask-connect\.js\?v=\d+/g, `metamask-connect.js?v=${version}`);
   }
-  if (["index.html", "app.html", "privacy.html", "terms.html"].includes(fileName)) {
+  if (["index.html", "app.html", "admin.html", "privacy.html", "terms.html"].includes(fileName)) {
     return content
       .replace(/styles\.css\?v=\d+/g, `styles.css?v=${version}`)
       .replace(/home\.(css|js)\?v=\d+/g, (match, extension) => `home.${extension}?v=${version}`)
+      .replace(/admin\.(css|js)\?v=\d+/g, (match, extension) => `admin.${extension}?v=${version}`)
       .replace(/i18n\.js\?v=\d+/g, `i18n.js?v=${version}`)
       .replace(/service-worker\.js\?v=\d+/g, `service-worker.js?v=${version}`)
       .replace(/supabase-config\.js\?v=\d+/g, `supabase-config.js?v=${version}`)

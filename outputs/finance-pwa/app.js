@@ -428,6 +428,7 @@
     household: null,
     householdMembers: [],
     membersError: "",
+    commercialAccess: null,
     error: "",
     lastSyncedAt: null,
     saving: false
@@ -493,6 +494,7 @@
       return;
     }
     if (action === "none") return;
+    if (action === "view-plans") { closeModal(); state.ui.activeTab = "plans"; render(); return; }
     if (action === "set-auth-view") {
       authView = button.dataset.view || "welcome";
       if (authView === "reset" && !isPasswordRecoveryLink) passwordRecoveryStep = "request";
@@ -720,12 +722,19 @@
     if (action === "reset-demo") resetDemo();
   });
 
-  document.addEventListener("submit", (event) => {
+  document.addEventListener("submit", async (event) => {
     const form = event.target;
     if (!form.matches("form[data-form]")) return;
     event.preventDefault();
 
     const formType = form.dataset.form;
+    if (remoteStore.enabled && remoteSession.user && (commercialFeatureForType(formType) || ["bank-account","income-source","goal","emergency-reserve","category-budget"].includes(formType))) {
+      if (form.dataset.planChecking) return;
+      form.dataset.planChecking = "true";
+      try { await loadCommercialAccess(); } finally { delete form.dataset.planChecking; }
+      if (commercialSnapshot()?.blocked) { render(); return; }
+    }
+    if (!guardCommercialForm(formType, formData(form))) return;
     if (!hasHouseholdPermission("write") && !["auth-login", "auth-signup", "auth-recovery-request", "auth-recovery-code", "auth-reset", "join-family", "settings"].includes(formType)) {
       showToast("Seu perfil familiar possui acesso somente para visualizacao.");
       return;
@@ -768,6 +777,7 @@
     if (formType === "auth-recovery-code") verifyPasswordRecoveryCode(form);
     if (formType === "auth-reset") updatePasswordFromRecovery(form);
     if (formType === "join-family") joinFamilyFromForm(form);
+    if (formType === "family-settings") saveFamilySettings(form);
     if (formType === "settings") saveSettings(form);
   });
 
@@ -988,16 +998,17 @@
 
       remoteSession.user = session.user;
       const pendingSocialAuth = readPendingSocialAuth();
-      const inviteCode = normalizeInviteCode(pendingSocialAuth?.inviteCode);
-      const familyName = String(pendingSocialAuth?.familyName || session.user?.user_metadata?.family_name || "").trim();
-      if (familyName && !session.user?.user_metadata?.family_name) {
+      const inviteCode = normalizeInviteCode(pendingSocialAuth?.inviteCode || localStorage.getItem(`nekuma-pending-family:${session.user.email}`));
+      const familyName = String(session.user?.user_metadata?.family_name || "").trim();
+      const displayName = String(pendingSocialAuth?.displayName || "").trim();
+      if (displayName) {
         const { data: updatedUser, error: updateError } = await remoteStore.client.auth.updateUser({
-          data: { family_name: familyName }
+          data: { display_name: displayName, name: displayName }
         });
         if (updateError) throw updateError;
         remoteSession.user = updatedUser?.user || session.user;
       }
-      if (inviteCode) await joinRemoteHouseholdByCode(inviteCode);
+      if (inviteCode) await joinPendingFamily(inviteCode);
       else await loadRemoteState(familyName);
       clearPendingSocialAuth();
       clearAuthCallbackParams();
@@ -1021,19 +1032,19 @@
     render();
     try {
       const { data: authData, error } = await remoteStore.client.auth.signInWithPassword({
-        email: data.email.trim(),
+        email: data.email.trim().toLowerCase(),
         password: data.password
       });
       if (error) throw error;
       remoteSession.user = authData.user;
-      const inviteCode = normalizeInviteCode(data.inviteCode);
-      if (inviteCode) await joinRemoteHouseholdByCode(inviteCode);
+      const inviteCode = normalizeInviteCode(data.inviteCode || localStorage.getItem(`nekuma-pending-family:${authData.user.email}`));
+      if (inviteCode) await joinPendingFamily(inviteCode);
       else await loadRemoteState(remoteSession.user?.user_metadata?.family_name);
       prepareAuthenticatedLanguage(authData.user);
       remoteSession.status = languageSetupRequired ? "languageSetup" : "ready";
       startRemoteAutoSync();
       render();
-      showToast(inviteCode ? "Familia conectada." : "Login realizado.");
+      showToast(remoteSession.error || (inviteCode ? "Familia conectada." : "Login realizado."));
     } catch (error) {
       remoteSession.status = "signedOut";
       remoteSession.error = error.message || "Nao foi possivel entrar.";
@@ -1043,19 +1054,27 @@
 
   async function signUpRemote(form) {
     const data = formData(form);
-    const familyName = String(data.familyName || "").trim();
+    const displayName = String(data.displayName || "").trim();
+    if (!displayName || displayName.length > 100) return showToast("Informe seu nome.");
     remoteSession.status = "loading";
     remoteSession.error = "";
     render();
     try {
       const { data: authData, error } = await remoteStore.client.auth.signUp({
-        email: data.email.trim(),
+        email: data.email.trim().toLowerCase(),
         password: data.password,
         options: {
-          data: familyName ? { family_name: familyName } : {}
+          data: { display_name: displayName, name: displayName }
         }
       });
       if (error) throw error;
+      if (!authData.session && Array.isArray(authData.user?.identities) && authData.user.identities.length === 0) {
+        remoteSession.status = "signedOut";
+        remoteSession.error = "Nao foi criado um novo cadastro. Tente entrar ou recuperar sua senha; se ainda nao confirmou seu email, confira sua caixa de entrada.";
+        render();
+        return;
+      }
+      if (data.inviteCode) localStorage.setItem(`nekuma-pending-family:${data.email.trim().toLowerCase()}`, normalizeInviteCode(data.inviteCode));
       if (!authData.session?.user) {
         remoteSession.status = "signedOut";
         render();
@@ -1064,7 +1083,6 @@
         return;
       }
 
-      if (familyName) state.settings.familyName = familyName;
       await remoteStore.client.auth.signOut().catch(() => {});
       remoteSession.status = "signedOut";
       remoteSession.user = null;
@@ -1131,9 +1149,11 @@
     }
 
     const pending = context === "signup" ? {
-      familyName: String(document.querySelector("#signupFamily")?.value || "").trim(),
+      displayName: String(document.querySelector("#signupName")?.value || "").trim(),
       inviteCode: normalizeInviteCode(document.querySelector("#signupInviteCode")?.value)
     } : {};
+    if (context === "signup" && !document.querySelector("#signupName")?.reportValidity()) return;
+    if (context === "signup" && !pending.displayName) return showToast("Informe seu nome.");
     sessionStorage.setItem(SOCIAL_AUTH_PENDING_KEY, JSON.stringify(pending));
     remoteSession.status = "loading";
     remoteSession.error = "";
@@ -1284,6 +1304,14 @@
     }
   }
 
+  async function joinPendingFamily(inviteCode) {
+    try { await joinRemoteHouseholdByCode(inviteCode); }
+    catch (error) {
+      await loadRemoteState();
+      remoteSession.error = error.message || "Convite invalido ou plano Familia inativo.";
+    } finally { localStorage.removeItem(`nekuma-pending-family:${remoteSession.user.email}`); }
+  }
+
   async function joinRemoteHouseholdByCode(inviteCode) {
     const code = normalizeInviteCode(inviteCode);
     if (!code) throw new Error("Informe o codigo da familia.");
@@ -1338,6 +1366,8 @@
     remoteSession.household = household;
     rememberRemoteHousehold(household.id);
     await loadRemoteHouseholdMembers(household.id);
+    await loadCommercialAccess();
+    if (remoteSession.commercialAccess?.blocked) throw new Error("Conta bloqueada. Entre em contato com o suporte.");
 
     const { data, error } = await remoteStore.client
       .from("app_states")
@@ -1517,6 +1547,12 @@
       }
 
       remoteSession.lastSyncedAt = data || now;
+    } catch (error) {
+      if (/PLAN_LIMIT|PLAN_FEATURE/.test(error.message || "")) {
+        await loadCommercialAccess();
+        throw new Error("Seu plano nao permite esta alteracao. Os dados locais foram preservados; revise os limites antes de sincronizar.");
+      }
+      throw error;
     } finally {
       remoteSession.saving = false;
     }
@@ -1620,6 +1656,20 @@
     const generation = stateGeneration;
     remotePullInFlight = true;
     try {
+      if (Date.now() - (remoteSession.commercialAccess?.checkedAt || 0) > 60000) {
+        const wasSharedMember = remoteSession.householdMembers.some((member) => member.userId === remoteSession.user?.id && member.role !== "owner");
+        await loadCommercialAccess();
+        if (generation !== stateGeneration || resetInProgress) return;
+        if (remoteSession.commercialAccess?.blocked) { renderKeepingScroll(); return; }
+        if (wasSharedMember && remoteSession.commercialAccess && !remoteSession.commercialAccess.familyHouseholdIds?.includes(remoteSession.householdId)) {
+          localStorage.removeItem(remoteStateStorageKey(remoteSession.householdId));
+          await loadRemoteState();
+          renderKeepingScroll();
+          showToast("O compartilhamento familiar esta inativo. Seu espaco pessoal foi aberto.");
+          return;
+        }
+        renderKeepingScroll();
+      }
       const { data, error } = await remoteStore.client
         .from("app_states")
         .select("state,updated_at")
@@ -1651,10 +1701,8 @@
 
   async function updateRemoteHouseholdName(name) {
     if (!remoteStore.enabled || !remoteSession.householdId) return;
-    const { error } = await remoteStore.client
-      .from("households")
-      .update({ name })
-      .eq("id", remoteSession.householdId);
+    if (!canManageFamily()) return;
+    const { error } = await remoteStore.client.rpc("configure_paid_family", { target_household: remoteSession.householdId, family_name: name });
     if (error) throw error;
     remoteSession.household = { ...(remoteSession.household || {}), name };
   }
@@ -1830,6 +1878,7 @@
   }
 
   function activeCategorizationRules() {
+    if (!hasCommercialFeature("automation")) return [];
     return [...(state.categorizationRules || []).filter((item) => item.active !== false), ...builtInCategorizationRules];
   }
 
@@ -2786,7 +2835,7 @@
   }
 
   function render() {
-    if (window.NekumaDashboard?.isDragging()) return;
+    if (window.NekumaDashboard?.isDragging() && remoteSession.status !== "blocked") return;
     document.body.classList.toggle("auth-mode", remoteStore.enabled && remoteSession.status !== "ready");
     document.documentElement.classList.toggle("auth-mode", remoteStore.enabled && remoteSession.status !== "ready");
     document.body.classList.toggle("online-mode", remoteStore.enabled && remoteSession.status === "ready");
@@ -2833,7 +2882,9 @@
     }, state.ui.selectedMonth);
     setupStableTabColumns();
     refreshIcons();
-    window.NekumaBinance?.mount({ token: currentSupabaseAccessToken, money: formatMoney, convert, hidden: () => state.ui.hideCryptoDetails, icon: symbol => renderCryptoTokenIcon({ symbol, color: cryptoCatalog[symbol]?.color || '#71877e' }), icons: refreshIcons, onUpdate: () => { renderKeepingScroll(); refreshCryptoQuotes(true); } });
+    if (hasCommercialFeature("binance")) window.NekumaBinance?.mount({ allowed: () => hasCommercialFeature("binance"), token: currentSupabaseAccessToken, money: formatMoney, convert, hidden: () => state.ui.hideCryptoDetails, icon: symbol => renderCryptoTokenIcon({ symbol, color: cryptoCatalog[symbol]?.color || '#71877e' }), icons: refreshIcons, onUpdate: () => { renderKeepingScroll(); refreshCryptoQuotes(true); } });
+    else window.NekumaBinance?.clear();
+    applyCommercialChartLocks();
     mountAiAssistant();
     setupDashboardAccountCarousel();
     setupBankAccountOrdering();
@@ -2912,7 +2963,7 @@
   }
 
   function renderKeepingScroll() {
-    if (window.NekumaDashboard?.isDragging()) return;
+    if (window.NekumaDashboard?.isDragging() && remoteSession.status !== "blocked") return;
     const scroll = { x: window.scrollX || 0, y: window.scrollY || 0 };
     const tab = state.ui.activeTab;
     const panelKey = panel => panel?.dataset.dashboardCard || [...(panel?.classList || [])].filter(name => name !== 'content-panel').join(' ');
@@ -3091,11 +3142,12 @@
   }
 
   function updateAppGreeting() {
-    const family = remoteSession.household?.name || state.settings.familyName || "familia";
+    const metadata = remoteSession.user?.user_metadata || {};
+    const name = metadata.display_name || metadata.name || metadata.full_name || "Usuario";
     if (appGreeting) {
       appGreeting.textContent = remoteStore.enabled && remoteSession.status !== "ready"
         ? "Nekuma Finance"
-        : `Hey, ${family}`;
+        : `${({ "ja-JP": "ようこそ", "en-US": "Welcome" })[activeLanguage()] || "Bem-vindo"}, ${name}`;
     }
     if (countryContext) countryContext.textContent = countryContextLabel();
   }
@@ -3275,12 +3327,11 @@
           <p class="auth-kicker">Cadastro</p>
           <h2>Criar sua conta</h2>
         </div>
-        <button class="small-action ghost" type="button" data-action="go-landing">Voltar</button>
       </div>
       <form class="form-grid" data-form="auth-signup">
         <div class="field">
-          <label for="signupFamily">Nome da família <small>opcional</small></label>
-          <input id="signupFamily" name="familyName" placeholder="Use se estiver criando uma nova família" />
+          <label for="signupName">Nome</label>
+          <input id="signupName" name="displayName" autocomplete="name" maxlength="100" required />
         </div>
         <div class="field">
           <label for="signupEmail">Email</label>
@@ -3290,10 +3341,11 @@
           <label for="signupPassword">Senha</label>
           <input id="signupPassword" name="password" type="password" autocomplete="new-password" minlength="6" required />
         </div>
-        <div class="field">
-          <label for="signupInviteCode">Código da família <small>opcional</small></label>
+        <details class="field">
+          <summary>Entrar em uma familia</summary>
+          <label for="signupInviteCode">Convite de um assinante Familia</label>
           <input id="signupInviteCode" name="inviteCode" inputmode="text" autocomplete="off" placeholder="Use se recebeu um convite" />
-        </div>
+        </details>
         ${renderGoogleAuthButton("signup")}
         <div class="auth-divider"><span>ou crie com email</span></div>
         <button class="primary-button" type="submit">Criar login</button>
@@ -3443,7 +3495,7 @@
 
   function renderCurrentTab() {
     const tab = state.ui.activeTab;
-    if (tab === "family") return renderFamilyPage();
+    if (tab === "family") return hasFamilyAccess() ? renderFamilyPage() : renderPlansPage();
     if (tab === "referrals") return renderReferralPage();
     if (tab === "accounts") return renderAccounts();
     if (tab === "budgets") return renderBudgetsPage();
@@ -3629,6 +3681,7 @@
   }
 
   function showAppNewsModal() {
+    const appNews = currentAppNews();
     const readIds = readAppNewsIds();
     modalRoot.innerHTML = `
       <div class="modal-backdrop">
@@ -3676,7 +3729,16 @@
 
   function unreadAppNews() {
     const readIds = readAppNewsIds();
-    return appNews.filter((item) => !readIds.includes(item.id));
+    return currentAppNews().filter((item) => !readIds.includes(item.id));
+  }
+
+  function currentAppNews() {
+    const access = remoteSession.commercialAccess;
+    const notices = access?.userId === remoteSession.user?.id ? access?.notices || [] : [];
+    return [...notices.map((item) => ({ id: item.id, date: String(item.created_at).slice(0, 10),
+      title: item.plan === "family" ? "Seu plano Familia esta ativo" : "Seu plano PRO esta ativo",
+      body: item.plan === "family" ? "Os recursos PRO e de conexao familiar foram liberados para sua conta." : "Os recursos PRO foram liberados para sua conta."
+    })), ...appNews];
   }
 
   function readAppNewsIds() {
@@ -3705,7 +3767,7 @@
   }
 
   function markAllAppNewsRead() {
-    writeAppNewsIds(appNews.map((item) => item.id));
+    writeAppNewsIds(currentAppNews().map((item) => item.id));
     closeModal();
     showToast("Novidades marcadas como lidas.");
   }
@@ -3801,9 +3863,9 @@
             ${renderHousingPanel(2)}
           </section>
 
-          <section class="content-panel family-panel">
+          ${hasFamilyAccess() ? `<section class="content-panel family-panel">
             ${renderFamilyPanel()}
-          </section>
+          </section>` : ""}
           <section class="content-panel budget-summary-panel">
             ${renderBudgetSummaryPanel()}
           </section>
@@ -3833,9 +3895,9 @@
             ${renderBalanceProjectionPanel()}
           </article>
 
-          <article class="content-panel family-pie-panel">
+          ${hasFamilyAccess() ? `<article class="content-panel family-pie-panel">
             ${renderFamilyFinancePiePanel(summary)}
-          </article>
+          </article>` : ""}
 
           <article class="content-panel recent-transactions-panel">
             <div class="panel-head">
@@ -3882,9 +3944,9 @@
 
           ${hasNubankAccount() ? `<section class="content-panel nubank-boxes-home-panel">${renderNubankBoxesPanel()}</section>` : ""}
 
-          <section class="content-panel family-tools-panel">
+          ${hasFamilyAccess() ? `<section class="content-panel family-tools-panel">
             ${renderBusinessShoppingPanel()}
-          </section>
+          </section>` : ""}
 
           <section class="content-panel debt-home-panel">
             <div class="panel-head">
@@ -3953,17 +4015,17 @@
             </div>
             <nav class="workspace-context-tabs" aria-label="Visoes do dashboard">
               <button class="is-active" type="button" data-action="set-tab" data-tab="dashboard">Main</button>
-              <button type="button" data-action="set-tab" data-tab="family">Familia</button>
+              ${hasFamilyAccess() ? `<button type="button" data-action="set-tab" data-tab="family">Familia</button>` : ""}
               <button type="button" data-action="set-tab" data-tab="referrals">Indique e ganhe</button>
               <button type="button" data-action="set-tab" data-tab="wealth">Investimentos</button>
               <button class="is-disabled" type="button" data-action="prototype-feature" data-feature="Novo espaco" aria-label="Novo espaco, em breve">+</button>
             </nav>
             <div class="workspace-metrics">
               <article class="workspace-metric workspace-salary-metric" tabindex="0">
-                <span>Salario previsto</span>
+                ${hasCommercialFeature("salary_projection") ? `<span>Salario previsto</span>
                 <strong>${hideBalance ? "*****" : formatMoney(salaryTotal, primaryCurrency())}</strong>
                 <small>${salaryCards.length ? `${salaryCards.length} fonte${salaryCards.length === 1 ? "" : "s"} no mes` : "Cadastre uma fonte de renda"}</small>
-                ${renderWorkspaceSalaryPopover(salaryCards, hideBalance)}
+                ${renderWorkspaceSalaryPopover(salaryCards, hideBalance)}` : renderPlanLock("Projecao salarial")}
               </article>
               <article class="workspace-metric"><span>Dolar / Real</span><strong>${quotes.usdBrl ? formatFxRate(quotes.usdBrl, 4) : "--"}</strong>${renderFxChangeChip(quotes.usdBrlChange)}</article>
               <article class="workspace-metric"><span>Dolar / Iene</span><strong>${usdJpy ? formatYenRate(usdJpy) : "--"}</strong>${renderFxChangeChip(quotes.usdJpyChange)}</article>
@@ -4691,7 +4753,7 @@
     const summary = summarizeMonth(state.ui.selectedMonth, "global");
     return `
       <div class="detail-page-shell">
-        ${renderPageIntro("Espaco compartilhado", state.settings.familyName, "Acompanhe a familia e defina exatamente o que cada pessoa pode fazer.", `<button class="primary-button" type="button" data-action="copy-invite-code"><i data-lucide="user-plus"></i>Convidar pessoa</button>`)}
+        ${renderPageIntro("Espaco compartilhado", state.settings.familyName, "Acompanhe a familia e defina exatamente o que cada pessoa pode fazer.", canManageFamily() ? `<button class="primary-button" type="button" data-action="copy-invite-code"><i data-lucide="user-plus"></i>Convidar pessoa</button>` : "")}
         <section class="detail-kpi-grid">
           <article><span>Membros</span><strong>${members.length}</strong><small>perfis conectados</small></article>
           <article><span>Papel atual</span><strong>${escapeHtml(householdRoleLabel(role))}</strong><small>${escapeHtml(householdRoleDescription(role))}</small></article>
@@ -4864,19 +4926,52 @@
   }
 
   function renderPlansPage() {
-    const current = state.commercial.plan || "free";
-    const plans = [
-      { key: "free", name: "Nekuma Free", copy: "Organizacao financeira essencial para comecar.", features: ["Dashboard financeiro", "Contas e cartoes", "Registro manual", "Perfil inteligente"] },
-      { key: "plus", name: "Nekuma Plus", copy: "Mais analise e automacao para a rotina individual.", features: ["Tudo do Free", "Relatorios avancados", "Automacoes e alertas", "Leitura de recibos quando lancada"], featured: true },
-      { key: "family", name: "Nekuma Family", copy: "Um espaco protegido para organizar a familia.", features: ["Tudo do Plus", "Usuarios adicionais", "Papeis e permissoes", "Visao financeira familiar"] }
-    ];
-    return `
-      <div class="detail-page-shell commercial-page">
-        ${renderPageIntro("Planos Nekuma", "Escolha o nivel certo para sua rotina", "Os dados continuam seus em qualquer plano. Valores e cobranca serao definidos antes da liberacao comercial.")}
-        <section class="plan-grid">${plans.map((plan) => `<article class="plan-card ${plan.featured ? "is-featured" : ""} ${current === plan.key ? "is-current" : ""}"><div class="plan-card-head"><span>${plan.featured ? "Recomendado" : "Plano"}</span><h2>${plan.name}</h2><p>${plan.copy}</p></div><div class="plan-price"><strong>${plan.key === "free" ? "Gratis" : "Em breve"}</strong><small>${plan.key === "free" ? "para sempre" : "sem cobranca nesta etapa"}</small></div><ul>${plan.features.map((item) => `<li><i data-lucide="check"></i>${item}</li>`).join("")}</ul><button class="${plan.featured ? "primary-button" : "secondary-button"}" type="button" data-action="select-commercial-plan" data-plan="${plan.key}" ${current === plan.key ? "disabled" : ""}>${current === plan.key ? "Plano atual" : plan.key === "free" ? "Usar Free" : "Registrar interesse"}</button></article>`).join("")}</section>
-        <section class="content-panel commercial-resource-panel"><div class="panel-head"><div><h2>Recursos comerciais</h2><p class="row-meta">Base preparada para assinatura, limites de uso e beneficios.</p></div><span class="chip blue">Estrutura inicial</span></div><div class="commercial-resource-grid"><div><i data-lucide="badge-check"></i><strong>Controle de plano</strong><small>Nivel ativo visivel no perfil.</small></div><div><i data-lucide="users"></i><strong>Beneficios familiares</strong><small>Acesso orientado por permissoes.</small></div><div><i data-lucide="gift"></i><strong>Indicacoes</strong><small>Codigo e creditos promocionais.</small></div><div><i data-lucide="shield-check"></i><strong>Dados preservados</strong><small>Trocar de plano nao apaga historico.</small></div></div></section>
-      </div>
-    `;
+    return renderVerifiedPlansPage();
+  }
+
+  async function loadCommercialAccess() {
+    remoteSession.commercialAccess = null;
+    if (!remoteSession.user || !remoteStore.enabled) return;
+    const userId = remoteSession.user.id;
+    try {
+      const { data, error } = await remoteStore.client.rpc("my_commercial_access");
+      if (remoteSession.user?.id === userId && !error && data?.blocked) {
+        stopRemoteAutoSync();
+        modalRoot.innerHTML = "";
+        remoteSession.status = "blocked";
+        remoteSession.error = "Conta bloqueada. Entre em contato com o suporte.";
+        remoteSession.commercialAccess = { userId, blocked: true, checkedAt: Date.now() };
+        return;
+      }
+      if (remoteSession.user?.id === userId && !error && data && ["free", "pro", "family"].includes(data.plan)) {
+        const notices = await remoteStore.client.rpc("my_commercial_notifications");
+        if (remoteSession.user?.id !== userId) return;
+        remoteSession.commercialAccess = { ...data, userId, checkedAt: Date.now(), notices: !notices.error && Array.isArray(notices.data) ? notices.data : [] };
+      }
+    } catch { /* Commercial availability must not interrupt financial synchronization. */ }
+  }
+
+  function renderVerifiedPlansPage() {
+    const access = remoteSession.commercialAccess?.userId === remoteSession.user?.id ? remoteSession.commercialAccess : null;
+    const current = access?.plan;
+    const descriptions = {
+      free: ["1 conta bancaria", "1 fabrica ou fonte de renda", "Comparativo mensal", "Cripto manual", "2 categorias de orcamento e 1 meta", "Exportacao dos seus dados"],
+      pro: ["Varias contas e empresas", "Projecao salarial e graficos individuais", "30 scans por mes", "Integracoes MetaMask e Binance", "Automacoes, cartoes e patrimonio"],
+      family: ["Tudo do PRO", "Ate 5 membros", "60 scans mensais compartilhados", "Raio-X familiar", "Moradia com responsaveis por conta"]
+    };
+    const labels = { free: "Gratis", pro: "PRO", family: "Familia" };
+    return `<div class="detail-page-shell commercial-page">
+      ${renderPageIntro("Planos Nekuma", "Seu plano e seus recursos", "Dados preservados em qualquer plano. A contratacao ainda nao esta disponivel.")}
+      <section class="content-panel"><h2>${access ? `Plano ${labels[current]}` : "Plano aguardando validacao"}</h2>
+        <p class="row-meta">${access ? "Informacao consultada no servidor." : "A base comercial precisa estar disponivel no Supabase para confirmar seu acesso."}</p>
+        ${access?.status === "trialing" && access.trialEndsAt ? `<p>Teste ate ${escapeHtml(new Date(access.trialEndsAt).toLocaleString())}</p>` : ""}
+        ${access?.familySponsored ? "<p>Acesso fornecido pela assinatura da familia.</p>" : ""}
+        ${access?.paidUntil ? `<p>Periodo pago ate ${escapeHtml(new Date(access.paidUntil).toLocaleString())}</p>` : ""}
+        <p class="row-meta">${access?.enforcementActive ? "Limites ativos. Registros existentes sao preservados ao trocar de plano." : "Ativacao dos limites no servidor pendente."}</p>
+        ${access?.limits?.scansMonthly ? `<p class="row-meta">Scans neste mes: ${number(access.scansUsed)}/${access.limits.scansMonthly}${current === "family" ? " compartilhados pela familia" : ""}. Renovacao mensal no horario do Japao. Cada envio valido para leitura consome um scan, mesmo se a imagem nao puder ser reconhecida.</p>` : ""}
+      </section>
+      <section class="plan-grid">${["free", "pro", "family"].map(key => `<article class="plan-card ${key === current ? "is-current" : ""}"><div class="plan-card-head"><h2>${labels[key]}</h2></div><div class="plan-price"><strong>${key === "free" ? "Gratis" : key === "pro" ? "¥480" : "¥850"}</strong><small>${key === "free" ? "" : "/mes"}</small></div><ul>${descriptions[key].map(text => `<li><i data-lucide="check"></i>${text}</li>`).join("")}</ul><span class="chip">${key === current ? "Plano atual" : "Contratacao em breve"}</span></article>`).join("")}</section>
+    </div>`;
   }
 
   function renderWise() {
@@ -5178,13 +5273,8 @@
 
   function renderSettings() {
     const fx = currentFxQuoteInfo();
-    const household = remoteSession.household || {};
     const activeTheme = sanitizeWorkspaceTheme(state.ui.workspaceTheme);
     const activeThemeColors = workspaceThemePreviewColors(activeTheme);
-    const inviteCode = household.invite_code || "";
-    const inviteText = inviteCode
-      ? `Use o codigo ${inviteCode} para entrar na familia ${household.name || state.settings.familyName}.`
-      : "Conecte sua familia na nuvem para gerar um codigo de convite.";
     return `
       <section class="settings-smart-layout">
         <div class="settings-smart-column settings-smart-primary">
@@ -5195,7 +5285,6 @@
             </div>
             <div class="settings-shortcuts">
               <button class="settings-shortcut-button" type="button" data-action="set-tab" data-tab="reports"><span data-lucide="bar-chart-3" aria-hidden="true"></span><span>Relatorios</span></button>
-              <button class="settings-shortcut-button" type="button" data-action="set-tab" data-tab="family"><span data-lucide="users" aria-hidden="true"></span><span>Familia</span></button>
               <button class="settings-shortcut-button" type="button" data-action="set-tab" data-tab="plans"><span data-lucide="badge-percent" aria-hidden="true"></span><span>Plano ${escapeHtml(commercialPlanLabel(state.commercial.plan))}</span></button>
             </div>
             <div class="mobile-palette-setting">
@@ -5207,18 +5296,9 @@
             </div>
             <form class="form-grid" data-form="settings">
               <div class="two-cols">
-                <div class="field"><label for="familyName">Nome da familia</label><input id="familyName" name="familyName" value="${escapeAttr(state.settings.familyName)}" /></div>
                 <div class="field"><label for="baseCurrency">Moeda principal</label><select id="baseCurrency" name="baseCurrency">${currencyOptions(primaryCurrency())}</select><p class="row-meta">Usada nos saldos, graficos e relatorios.</p></div>
               </div>
               <div class="field"><label for="secondaryCurrency">Moeda secundaria</label><select id="secondaryCurrency" name="secondaryCurrency">${currencyOptions(secondaryCurrency())}</select><p class="row-meta">Aparece entre parenteses como comparativo. Nao pode ser igual a principal.</p></div>
-              <div class="settings-profile-card family-leader-setting">
-                <div class="panel-head compact"><h3>Organizacao familiar</h3><span class="chip green">Compartilhado</span></div>
-                <div class="field">
-                  <label for="familyLeaderId">Chefe da familia</label>
-                  <select id="familyLeaderId" name="familyLeaderId">${familyPayerOptions(state.settings.familyLeaderId || familyDashboardMemberModel().currentKey)}</select>
-                  <p class="row-meta">Responsavel principal e pagador padrao para novas moradias.</p>
-                </div>
-              </div>
               <div class="settings-profile-card">
                 <div class="panel-head compact"><h3>Perfil do usuario</h3><span class="chip blue">Pessoal</span></div>
                 <div class="two-cols">
@@ -5246,11 +5326,7 @@
             </form>
           </section>
 
-          <article class="content-panel profile-support-card">
-            <div class="panel-head compact"><h2>Convidar amigos</h2><span data-lucide="user-plus" aria-hidden="true"></span></div>
-            <p class="row-meta">${escapeHtml(inviteText)}</p>
-            <button class="secondary-button" type="button" data-action="copy-invite-code" ${inviteCode ? "" : "disabled"}>Copiar convite</button>
-          </article>
+          ${renderFamilySettingsCard()}
 
           ${renderAutomationSettingsPanel()}
 
@@ -5306,6 +5382,7 @@
   }
 
   function renderAutomationSettingsPanel() {
+    if (!hasCommercialFeature("automation")) return `<article class="content-panel">${renderPlanLock("Automacao financeira")}</article>`;
     const rules = state.categorizationRules || [];
     const insights = recurringTransactionInsights().slice(0, 6);
     return `
@@ -5770,10 +5847,100 @@
     showToast("Foto do perfil removida.");
   }
 
+  function commercialSnapshot() {
+    return remoteSession.user?.id && remoteSession.commercialAccess?.userId === remoteSession.user.id ? remoteSession.commercialAccess : null;
+  }
+
+  function hasCommercialFeature(feature) {
+    const access = commercialSnapshot();
+    return Boolean(access && !access.blocked && access.limits?.features?.includes(feature));
+  }
+
+  function commercialFeatureForType(type) {
+    return ({ creditCard: "cards", "credit-card": "cards", cardPurchase: "cards", "card-purchase": "cards",
+      investment: "wealth", debt: "wealth", consortium: "wealth", nubankBox: "wealth", "nubank-box": "wealth",
+      nubankBoxContribution: "wealth", "nubank-box-contribution": "wealth", receipt: "receipt_scan", web3Wallet: "metamask",
+      categorizationRule: "automation", "categorization-rule": "automation", projectionScenario: "projections", "projection-scenario": "projections" })[type] || "";
+  }
+
+  function renderPlanLock(title) {
+    return `<div class="plan-resource-lock"><i data-lucide="lock-keyhole" aria-hidden="true"></i><div><strong>${escapeHtml(title)}</strong><p>Disponivel no PRO e Familia. Seus dados existentes continuam salvos.</p></div><button class="small-action" type="button" data-action="view-plans">Ver planos</button></div>`;
+  }
+
+  function showPlanUpgrade(title = "Recurso PRO") {
+    modalRoot.innerHTML = `<div class="modal-backdrop"><section class="modal" role="dialog" aria-modal="true" aria-label="Recurso do plano"><div class="modal-head"><h2>Seu plano</h2><button class="close-button" type="button" data-action="close-modal" aria-label="Fechar">x</button></div>${renderPlanLock(title)}</section></div>`;
+    refreshIcons(); i18n?.translate(modalRoot, activeLanguage());
+  }
+
+  function guardCommercialForm(type, data = {}) {
+    const feature = commercialFeatureForType(type);
+    if (feature && !hasCommercialFeature(feature)) { showPlanUpgrade(); return false; }
+    const resource = ({ bankAccount: "bankAccounts", "bank-account": "bankAccounts", incomeSource: "incomeSources", "income-source": "incomeSources", goal: "financialGoals", emergencyReserve: "financialGoals", "emergency-reserve": "financialGoals", categoryBudget: "categoryBudgets", "category-budget": "categoryBudgets" })[type];
+    if (!resource) return true;
+    const access = commercialSnapshot();
+    if (remoteStore.enabled && !access) { showToast("Nao foi possivel validar seu plano. Tente atualizar o app."); return false; }
+    const rows = state[resource] || [];
+    const active = row => resource !== "financialGoals" || row.active !== false;
+    const existingId = data.id || (["emergencyReserve", "emergency-reserve"].includes(type) ? emergencyGoal()?.id : "");
+    if (existingId && rows.some(row => row.id === existingId && active(row) && (resource !== "categoryBudgets" || row.month === (data.month || state.ui.selectedMonth)))) return true;
+    const key = ({ bankAccounts: "accounts", incomeSources: "incomeSources", financialGoals: "activeGoals", categoryBudgets: "budgetCategories" })[resource];
+    const cap = access?.limits?.[key] ?? (access?.plan === "pro" || access?.plan === "family" ? null : resource === "categoryBudgets" ? 2 : 1);
+    const count = rows.filter(row => active(row) && (resource !== "categoryBudgets" || row.month === (data.month || state.ui.selectedMonth))).length;
+    if (cap !== null && count >= cap) { showPlanUpgrade(`Limite do plano: ${cap}`); return false; }
+    return true;
+  }
+
+  function applyCommercialChartLocks() {
+    if (hasCommercialFeature("projections")) return;
+    app.querySelectorAll("canvas").forEach(canvas => {
+      if (canvas.id === "trend-chart") return;
+      const locked = document.createElement("div"); locked.innerHTML = renderPlanLock("Graficos avancados");
+      canvas.replaceWith(locked);
+    });
+    refreshIcons(); i18n?.translate(app, activeLanguage());
+  }
+
+  function hasFamilyAccess() {
+    const access = remoteSession.commercialAccess;
+    return Boolean(remoteSession.user?.id && access?.userId === remoteSession.user.id && access.plan === "family" &&
+      (access.personalPlan === "family" || access.familyHouseholdIds?.includes(remoteSession.householdId)));
+  }
+
+  function canManageFamily() {
+    return hasFamilyAccess() && remoteSession.commercialAccess.personalPlan === "family" &&
+      remoteSession.householdMembers.some((member) => member.userId === remoteSession.user.id && member.role === "owner");
+  }
+
+  function renderFamilySettingsCard() {
+    if (!hasFamilyAccess()) return "";
+    const owner = canManageFamily();
+    return `<section class="content-panel">
+      <div class="panel-head"><h2>Familia</h2><span class="chip green">${remoteSession.householdMembers.length}/5</span></div>
+      ${owner ? `<form class="form-grid" data-form="family-settings">
+        <div class="field"><label for="familyName">Nome da familia</label><input id="familyName" name="familyName" maxlength="100" required value="${escapeAttr(remoteSession.household?.name || state.settings.familyName)}" /></div>
+        <div class="field"><label for="familyLeaderId">Chefe da familia</label><select id="familyLeaderId" name="familyLeaderId">${familyPayerOptions(state.settings.familyLeaderId || familyDashboardMemberModel().currentKey)}</select></div>
+        <button class="primary-button" type="submit">Salvar familia</button>
+      </form><button class="secondary-button" type="button" data-action="copy-invite-code">Gerar ou copiar convite</button>` : `<p class="row-title">${escapeHtml(remoteSession.household?.name || "Familia")}</p><p class="row-meta">Convites sao gerenciados pelo titular do plano Familia.</p>`}
+      ${renderHouseholdMembers()}
+    </section>`;
+  }
+
+  async function saveFamilySettings(form) {
+    if (!canManageFamily()) return showToast("Apenas o titular do plano Familia pode gerenciar a familia.");
+    const data = formData(form);
+    try {
+      await updateRemoteHouseholdName(String(data.familyName || "").trim());
+      state.settings.familyName = remoteSession.household.name;
+      state.settings.familyLeaderId = String(data.familyLeaderId || "");
+      saveState();
+      render();
+      showToast("Familia salva.");
+    } catch (error) { showToast(error.message || "Nao foi possivel salvar a familia."); }
+  }
+
   function renderCloudSettings() {
     if (!remoteStore.enabled) return "";
     const userEmail = remoteSession.user?.email || "desconectado";
-    const household = remoteSession.household || {};
     return `
       <section class="content-panel">
         <div class="panel-head">
@@ -5790,19 +5957,10 @@
           </div>
           <div class="list-row compact">
             <div>
-              <p class="row-title">${escapeHtml(household.name || state.settings.familyName)}</p>
-              <p class="row-meta">Compartilhe este codigo: ${escapeHtml(household.invite_code || "--")}</p>
+              <p class="row-title">Dados sincronizados</p>
             </div>
             <button class="small-action" type="button" data-action="remote-sync-now">Sincronizar</button>
           </div>
-          ${renderHouseholdMembers()}
-          <form class="join-family-card" data-form="join-family">
-            <div class="field">
-              <label for="joinInviteCode">Entrar em outra familia</label>
-              <input id="joinInviteCode" name="inviteCode" inputmode="text" autocomplete="off" required placeholder="Cole aqui o codigo da familia" />
-            </div>
-            <button class="secondary-button" type="submit">Conectar familia</button>
-          </form>
           <div class="list-row compact">
             <div>
               <p class="row-title">Ultima sincronizacao</p>
@@ -5854,8 +6012,13 @@
   }
 
   async function copyInviteCode() {
-    const household = remoteSession.household || {};
-    const inviteCode = household.invite_code || "";
+    if (!canManageFamily()) return showToast("Apenas o titular do plano Familia pode gerar convites.");
+    let inviteCode;
+    try {
+      const { data, error } = await remoteStore.client.rpc("paid_family_invite", { target_household: remoteSession.householdId });
+      if (error) throw error;
+      inviteCode = data;
+    } catch (error) { return showToast(error.message || "Convite indisponivel."); }
     if (!inviteCode) {
       showToast("Codigo de convite indisponivel.");
       return;
@@ -5912,6 +6075,7 @@
                 <p class="row-meta">${member.joinedAt ? `Entrou em ${formatShortDate(member.joinedAt)}` : "Vinculo ativo"}</p>
               </div>
               <span class="chip ${member.role === "owner" ? "gold" : "green"}">${member.role === "owner" ? "Dono" : "Membro"}</span>
+              ${canManageFamily() && member.role !== "owner" ? `<select data-family-role data-user-id="${escapeAttr(member.userId)}" aria-label="Permissao de ${escapeAttr(member.displayName || "membro")}"><option value="viewer" ${selectedAttr("viewer", member.role)}>Visualizacao</option><option value="editor" ${selectedAttr("editor", member.role)}>Edicao</option><option value="admin" ${selectedAttr("admin", member.role)}>Gestao familiar</option></select>` : ""}
             </div>
           `).join("")}
         </div>
@@ -6672,6 +6836,7 @@
   }
 
   function renderCryptoTab() {
+    if (!hasCommercialFeature("metamask")) return `<div class="detail-page-shell">${renderPageIntro("Cripto", "Carteira manual", "Seus registros de compra, venda e custodia.")}<section class="content-panel">${renderCryptoPanel(false, true)}</section><section class="content-panel">${renderCryptoPortfolioTable()}</section>${renderCryptoTransactionDetails()}</div>`;
     return `
       <div class="crypto-page-layout">
         ${renderCryptoTotalCard()}
@@ -6864,6 +7029,7 @@
       sourceDetail: `${item.purchaseCount || 0} compras · ${item.saleCount || 0} vendas`
     }));
 
+    if (!hasCommercialFeature("metamask")) return rows.sort((a,b) => (b.value || 0) - (a.value || 0));
     const normalizedWallet = normalizeWeb3Wallet(state.web3Wallet);
     const wallets = normalizedWallet.wallets.length ? normalizedWallet.wallets : normalizedWallet.address ? [normalizedWallet] : [];
     wallets.forEach((wallet) => {
@@ -7967,7 +8133,7 @@
   }
 
   function renderCryptoPanel(compact = false, controlsOnly = false) {
-    return `<div class="crypto-origins ${controlsOnly ? "is-controls-only" : ""}">${renderMetaMaskGroup(compact, controlsOnly)}<div class="crypto-origin-group binance-group" data-binance-group ${controlsOnly ? "data-controls-only" : ""}></div><section class="crypto-origin-group manual-crypto-group" aria-label="Criptos manuais"><div class="panel-head"><div><h3><i data-lucide="coins" aria-hidden="true"></i>Cadastro manual</h3>${controlsOnly ? `<span class="row-meta">Adicione ativos que não possuem conexão automática.</span>` : ""}</div><button class="small-action" type="button" data-action="open-modal" data-modal="crypto"><i data-lucide="plus" aria-hidden="true"></i>Nova cripto</button></div>${controlsOnly ? "" : renderManualCryptoPanel(compact)}</section></div>`;
+    return `<div class="crypto-origins ${controlsOnly ? "is-controls-only" : ""}">${hasCommercialFeature("metamask") ? `${renderMetaMaskGroup(compact, controlsOnly)}<div class="crypto-origin-group binance-group" data-binance-group ${controlsOnly ? "data-controls-only" : ""}></div>` : renderPlanLock("MetaMask e Binance")}<section class="crypto-origin-group manual-crypto-group" aria-label="Criptos manuais"><div class="panel-head"><div><h3><i data-lucide="coins" aria-hidden="true"></i>Cadastro manual</h3>${controlsOnly ? `<span class="row-meta">Adicione ativos que não possuem conexão automática.</span>` : ""}</div><button class="small-action" type="button" data-action="open-modal" data-modal="crypto"><i data-lucide="plus" aria-hidden="true"></i>Nova cripto</button></div>${controlsOnly ? "" : renderManualCryptoPanel(compact)}</section></div>`;
   }
 
   function renderMetaMaskGroup(compact = false, controlsOnly = false) {
@@ -8746,6 +8912,14 @@
   }
 
   function openModal(type, id = "") {
+    const feature = commercialFeatureForType(type);
+    const readOnly = Boolean(feature && !hasCommercialFeature(feature) && id);
+    if (feature && !hasCommercialFeature(feature) && !id) { showPlanUpgrade(); return; }
+    if (!feature && !guardCommercialForm(type, { id: String(id).startsWith("new:") ? "" : id })) return;
+    if (["familyMember", "familyBusiness", "businessControl"].includes(type) && !hasFamilyAccess()) {
+      showToast("Recurso exclusivo do plano Familia.");
+      return;
+    }
     const map = {
       addHub: renderAddHubModal,
       mobileMenu: renderMobileMenuModal,
@@ -8819,6 +8993,10 @@
     updateCreditCardPaymentFields();
     updateDebtTypeFields();
     updateMonthlyPaymentFields();
+    if (readOnly) {
+      modalRoot.querySelectorAll("form input, form select, form textarea, form button").forEach(control => { control.disabled = true; });
+      const notice = document.createElement("div"); notice.innerHTML = renderPlanLock("Consulta do historico"); modalRoot.querySelector(".modal")?.append(notice);
+    }
   }
 
   function renderDashboardTransactionList(items) {
@@ -8943,7 +9121,7 @@
         ]
       },
       {
-        title: "Familia",
+        title: hasFamilyAccess() ? "Familia" : "Moradia",
         actions: [
           { modal: "familyMember", icon: "P", title: "Pessoa da familia", meta: "Pai, mae, filho ou outros para vincular gastos" },
           { modal: "housingCard", icon: "A", title: "Moradia", meta: "Aluguel, luz, gas, agua e internet em um unico card" }
@@ -8982,7 +9160,7 @@
           <section class="add-hub-section">
             <h3>${escapeHtml(group.title)}</h3>
             <div class="add-hub-grid">
-              ${group.actions.map((item) => `
+              ${group.actions.filter((item) => !["familyMember", "familyBusiness", "businessControl"].includes(item.modal) || hasFamilyAccess()).map((item) => `
                 <button class="add-hub-option" type="button" data-action="open-modal" data-modal="${item.modal}">
                   <span class="row-icon">${item.icon}</span>
                   <span>
@@ -9034,7 +9212,7 @@
           <section class="mobile-menu-group">
             <h3>${escapeHtml(group.title)}</h3>
             <div class="mobile-menu-grid">
-              ${group.items.map((item) => `
+              ${group.items.filter((item) => item.tab !== "family" || hasFamilyAccess()).map((item) => `
                 <button class="mobile-menu-item ${item.tab === state.ui.activeTab ? "is-active" : ""}" type="button" data-action="set-tab" data-tab="${item.tab}">
                   <span class="mobile-menu-icon"><i data-lucide="${item.icon}" aria-hidden="true"></i></span>
                   <span><strong>${escapeHtml(item.label)}</strong><small>${escapeHtml(item.meta)}</small></span>
@@ -9112,12 +9290,12 @@
             </select>
           </div>
         </div>
-        <div class="field">
+        ${hasFamilyAccess() ? `<div class="field">
           <label for="transactionFamilyMemberId">Quem movimentou</label>
           <select id="transactionFamilyMemberId" name="familyMemberId">
             ${familyMemberOptions(item?.familyMemberId)}
           </select>
-        </div>
+        </div>` : `<input type="hidden" name="familyMemberId" value="${escapeAttr(item?.familyMemberId || "")}" />`}
         <div class="field">
           <label for="note">Observacao</label>
           <textarea id="note" name="note">${escapeHtml(item?.note || "")}</textarea>
@@ -9551,12 +9729,12 @@
             <label for="quickExpenseTitle">Local/descricao</label>
             <input id="quickExpenseTitle" name="title" required placeholder="Ex: Gyomu, Seven, Sugi" />
           </div>
-          <div class="field">
+          ${hasFamilyAccess() ? `<div class="field">
             <label for="quickExpenseMember">Quem gastou</label>
             <select id="quickExpenseMember" name="familyMemberId">
               ${familyMemberOptions()}
             </select>
-          </div>
+          </div>` : ""}
         </div>
         <div class="three-cols">
           <div class="field">
@@ -9844,7 +10022,7 @@
         <div class="three-cols receipt-payment-grid">
           <div class="field"><label for="receiptPaymentMethod">Forma identificada</label><select id="receiptPaymentMethod" name="paymentMethod">${Object.entries(scannedPaymentMethods).map(([value, label]) => `<option value="${value}" ${selectedAttr(value, paymentMethod)}>${escapeHtml(label)}</option>`).join("")}</select></div>
           <div class="field"><label for="receiptPaymentSource">Conta ou cartao</label><select id="receiptPaymentSource" name="paymentSource"><option value="">Sem vinculo</option><optgroup label="Contas">${activeBankAccounts().map((account) => `<option value="bank:${escapeAttr(account.id)}" ${selectedAttr(`bank:${account.id}`, paymentSource)}>${escapeHtml(bankAccountName(account))}</option>`).join("")}</optgroup><optgroup label="Cartoes">${(state.creditCards || []).filter((card) => card.active !== false).map((card) => `<option value="card:${escapeAttr(card.id)}" ${selectedAttr(`card:${card.id}`, paymentSource)}>${escapeHtml(card.nickname || card.issuer)}</option>`).join("")}</optgroup></select></div>
-          <div class="field"><label for="receiptFamilyMemberId">Quem gastou</label><select id="receiptFamilyMemberId" name="familyMemberId">${familyMemberOptions(item?.familyMemberId)}</select></div>
+          ${hasFamilyAccess() ? `<div class="field"><label for="receiptFamilyMemberId">Quem gastou</label><select id="receiptFamilyMemberId" name="familyMemberId">${familyMemberOptions(item?.familyMemberId)}</select></div>` : `<input type="hidden" name="familyMemberId" value="${escapeAttr(item?.familyMemberId || "")}" />`}
         </div>
         ${matches.length ? `<div class="receipt-match"><i data-lucide="link"></i><div><strong>Possivel compra ja registrada</strong><p>Encontramos uma movimentacao com a mesma data e valor. Vincule para evitar duplicidade.</p><select name="existingTransactionId"><option value="">Criar novo lancamento</option>${matches.map((entry) => `<option value="${escapeAttr(entry.id)}" ${selectedAttr(entry.id, item?.linkedTransactionId || "")}>${escapeHtml(entry.title)} · ${formatMoney(entry.amount, entry.currency)}</option>`).join("")}</select></div></div>` : ""}
         ${itemLines.length ? `<section class="receipt-items-review"><div class="panel-head"><div><h3>Itens detectados</h3><p class="row-meta">${itemLines.length} itens · soma ${formatMoney(itemLines.reduce((total, line) => total + number(line.total), 0), currency)}</p></div></div>${itemLines.map((line, index) => `<div class="receipt-item-row"><input type="hidden" name="itemName_${index}" value="${escapeAttr(line.name)}" /><input type="hidden" name="itemTotal_${index}" value="${number(line.total)}" /><span>${escapeHtml(line.name)}</span><small>${escapeHtml(line.category || "Outros")}</small><strong>${formatMoney(line.total, currency)}</strong></div>`).join("")}</section>` : ""}
@@ -9892,13 +10070,14 @@
   }
 
   async function scanReceiptImage() {
+    if (!hasCommercialFeature("receipt_scan")) { showPlanUpgrade("Scan de recibos"); return; }
     if (!receiptScanImageData || receiptScanBusy) return;
     receiptScanBusy = true;
     openModal("receipt");
     try {
       const token = await currentSupabaseAccessToken();
       if (!token) throw new Error("Entre na sua conta para usar o scan com IA.");
-      const response = await fetch("./api/receipt-scan", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ image: receiptScanImageData }) });
+      const response = await fetch("./api/receipt-scan", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ image: receiptScanImageData, householdId: remoteSession.householdId }) });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || "Nao foi possivel ler o recibo.");
       receiptScanResult = payload.receipt || null;
@@ -9907,6 +10086,7 @@
       showToast(error.message || "Nao consegui ler o recibo.");
     } finally {
       receiptScanBusy = false;
+      await loadCommercialAccess();
       openModal("receipt");
     }
   }
@@ -10207,10 +10387,10 @@
             <label for="firstBillMonth">Primeira fatura</label>
             <input id="firstBillMonth" name="firstBillMonth" type="month" required value="${escapeAttr(item?.firstBillMonth || state.ui.selectedMonth)}" />
           </div>
-          <div class="field">
+          ${hasFamilyAccess() ? `<div class="field">
             <label for="purchaseFamilyMember">Responsavel</label>
             <select id="purchaseFamilyMember" name="familyMemberId">${familyMemberOptions(item?.familyMemberId)}</select>
-          </div>
+          </div>` : `<input type="hidden" name="familyMemberId" value="${escapeAttr(item?.familyMemberId || "")}" />`}
         </div>
         <div class="two-cols">
           <div class="field">
@@ -10775,7 +10955,7 @@
     const cards = state.creditCards || [];
     const bankAccounts = activeBankAccounts();
     const companies = factorySources();
-    const defaultPayerId = item?.defaultPayerId || state.settings.familyLeaderId || familyDashboardMemberModel().currentKey;
+    const defaultPayerId = item?.defaultPayerId || (hasFamilyAccess() ? state.settings.familyLeaderId : "") || familyDashboardMemberModel().currentKey;
     return `
       <div class="modal-head">
         <h2>${item ? "Editar moradia" : "Nova moradia"}</h2>
@@ -10797,13 +10977,13 @@
               ${currencyOptions(selectedCurrency)}
             </select>
           </div>
-          <div class="field">
+          ${hasFamilyAccess() ? `<div class="field">
             <label for="housingDefaultPayerId">Quem paga normalmente</label>
             <select id="housingDefaultPayerId" name="defaultPayerId" required>
               ${familyPayerOptions(defaultPayerId)}
             </select>
             <p class="row-meta">Cada conta pode ter outro responsavel.</p>
-          </div>
+          </div>` : `<input type="hidden" name="defaultPayerId" value="${escapeAttr(defaultPayerId)}" />`}
         </div>
         <div class="housing-form-list">
           ${services.map((service) => renderHousingServiceFormRow(service, cards, bankAccounts, companies, activeCountry, defaultPayerId)).join("")}
@@ -10856,12 +11036,12 @@
             }).join("")}
           </select>
         </div>
-        <div class="field housing-payer-field">
+        ${hasFamilyAccess() ? `<div class="field housing-payer-field">
           <label for="${key}PayerId">Quem paga</label>
           <select id="${key}PayerId" name="${key}PayerId">
             ${familyPayerOptions(service.payerId === defaultPayerId ? "" : service.payerId, { allowDefault: true, defaultPayerId })}
           </select>
-        </div>
+        </div>` : `<input type="hidden" name="${key}PayerId" value="${escapeAttr(service.payerId || "")}" />`}
         <div class="field housing-card-field ${method === "card" ? "" : "is-hidden"}">
           <label for="${key}CardId">Cartao</label>
           <select id="${key}CardId" name="${key}CardId">
@@ -13118,8 +13298,6 @@
       const detail = i18n?.t("O aplicativo será reiniciado para aplicar o novo idioma.", previousLanguage) || "O aplicativo será reiniciado para aplicar o novo idioma.";
       if (!window.confirm(`${title}\n\n${detail}`)) return;
     }
-    state.settings.familyName = data.familyName.trim() || "Familia";
-    state.settings.familyLeaderId = String(data.familyLeaderId || "").trim();
     const baseCurrency = sanitizeCurrency(data.baseCurrency, PRIMARY_CURRENCY);
     state.settings.baseCurrency = baseCurrency;
     state.settings.secondaryCurrency = sanitizeSecondaryCurrency(data.secondaryCurrency, baseCurrency);
@@ -13132,9 +13310,6 @@
       avatarDataUrl: sanitizeProfileAvatar(state.profile.avatarDataUrl)
     };
     saveState();
-    updateRemoteHouseholdName(state.settings.familyName).catch((error) => {
-      remoteSession.error = error.message || "Falha ao atualizar familia.";
-    });
     if (languageChanged && remoteStore.enabled && remoteSession.user) {
       const { data: updated, error } = await remoteStore.client.auth.updateUser({
         data: { app_language: requestedLanguage, app_language_confirmed: true }
@@ -13661,6 +13836,11 @@
   }
 
   function drawVisibleCharts() {
+    if (!hasCommercialFeature("projections")) {
+      const trend = document.getElementById("trend-chart");
+      if (trend) drawTrendChart(trend);
+      return;
+    }
     const balancePie = document.getElementById("balance-pie-chart");
     if (balancePie) drawBalancePieChart(balancePie);
     const trend = document.getElementById("trend-chart");
@@ -14205,6 +14385,7 @@
   }
 
   async function connectWeb3Wallet() {
+    if (!hasCommercialFeature("metamask")) { showPlanUpgrade("Conexao MetaMask"); return; }
     const generation = stateGeneration;
 
     if (web3FetchInFlight) return;
@@ -14258,6 +14439,7 @@
   }
 
   async function restartWeb3Connection() {
+    if (!hasCommercialFeature("metamask")) { showPlanUpgrade("Conexao MetaMask"); return; }
     const operation = ++web3OperationId;
     const generation = stateGeneration;
     let timeout;
@@ -14284,6 +14466,7 @@
   }
 
   async function refreshWeb3Wallet(silent = false) {
+    if (!hasCommercialFeature("metamask")) return;
     const generation = stateGeneration;
     let provider = web3Provider();
     if (!state.web3Wallet?.address) {
@@ -15412,6 +15595,7 @@
   }
 
   function renderProjectionsPage() {
+    if (!hasCommercialFeature("projections")) return `<section class="content-panel">${renderPlanLock("Projecoes e simulacoes")}</section>`;
     const model = projectionComparisonModel();
     const scenario = model.scenario;
     const scenarios = state.projectionScenarios || [];
@@ -15495,6 +15679,7 @@
   }
 
   function renderBalanceProjectionPanel() {
+    if (!hasCommercialFeature("projections")) return renderPlanLock("Projecao do saldo");
     const model = balanceProjectionModel();
     return `
       <div class="panel-head">
@@ -18771,7 +18956,8 @@
   }
 
   function commercialPlanLabel(plan) {
-    return ({ free: "Free", plus: "Plus", family: "Family" })[plan] || "Free";
+    const verified = remoteSession.commercialAccess?.userId === remoteSession.user?.id ? remoteSession.commercialAccess?.plan : null;
+    return ({ free: "Gratis", pro: "PRO", family: "Familia" })[verified] || "A validar";
   }
 
   async function copyReferralCode() {
@@ -18795,12 +18981,7 @@
   }
 
   function selectCommercialPlan(plan) {
-    if (!["free", "plus", "family"].includes(plan)) return;
-    state.commercial.plan = plan;
-    if (!state.commercial.referralCode) state.commercial.referralCode = referralCode();
-    saveState();
-    renderKeepingScroll();
-    showToast(plan === "free" ? "Plano Free selecionado." : "Interesse registrado. Nenhuma cobranca foi realizada.");
+    showToast("A contratacao ainda nao esta disponivel. Seu plano sera confirmado pelo servidor.");
   }
 
   function memberInitials(member) {

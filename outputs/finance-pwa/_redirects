@@ -1,1 +1,2 @@
-/* /index.html 200
+# HTML pages use Cloudflare Pages native clean URLs (/app and /admin).
+# Do not rewrite unknown routes to the public homepage or financial application.

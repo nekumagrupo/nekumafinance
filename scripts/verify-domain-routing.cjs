@@ -18,6 +18,15 @@ const assert = require('node:assert/strict');
     assert.equal(response.status, 308);
     assert.equal(response.headers.get('Location'), location);
   }
+  for (const url of ['https://app.nekumafinance.app/admin','https://app.nekumafinance.app/admin.html?auth=login','https://nekuma-finance.pages.dev/admin']) {
+    const response=await check(url);
+    assert.equal(response.status,302);
+    assert.equal(response.headers.get('Location'),'https://nekumafinance.app/admin');
+  }
+  assert.equal((await check('https://admin.nekumafinance.app/')).headers.get('Location'),'https://admin.nekumafinance.app/admin');
+  assert.equal((await check('https://admin.nekumafinance.app/app')).status,404);
+  assert.equal((await check('https://admin.nekumafinance.app/api/support')).status,404);
+  for (const url of ['https://admin.nekumafinance.app/admin','https://admin.nekumafinance.app/admin.js','https://nekumafinance.app/admin?auth=login','http://localhost/admin.html']) assert.equal(await (await check(url)).text(),'next');
   assert.equal((await check('https://nekuma-finance.pages.dev/api/receipt-scan', 'POST')).status, 410);
   assert.equal((await check('https://nekuma-finance.pages.dev/api/binance')).status, 410);
   for (const url of ['https://app.nekumafinance.app/app', 'https://app.nekumafinance.app/api/receipt-scan', 'https://nekumafinance.app/', 'http://localhost/app.html']) {

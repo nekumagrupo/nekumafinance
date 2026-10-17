@@ -1,0 +1,57 @@
+-- Disposable PostgreSQL only; fixture rows rolled back.
+begin;
+insert into auth.users(id,email,created_at) select ('00000000-0000-4000-8000-'||lpad(i::text,12,'0'))::uuid,'test'||i||'@example.invalid',now()-interval '10 days' from generate_series(1,7)i;
+insert into public.households(id) values('10000000-0000-4000-8000-000000000001');
+insert into public.household_members(household_id,user_id,role) values('10000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000001','owner');
+insert into public.commercial_admins(user_id) values('00000000-0000-4000-8000-000000000007');
+do $$
+declare code text; target uuid:='10000000-0000-4000-8000-000000000001'; notices integer; event uuid;
+begin
+  perform set_config('request.jwt.claims','{"sub":"00000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal1"}',true);
+  begin perform public.paid_family_invite(target); raise exception 'FAIL Free generated invite'; exception when insufficient_privilege then null; end;
+  update public.commercial_subscriptions set plan='pro',status='active',paid_until=now()+interval '1 month' where user_id=auth.uid();
+  begin perform public.configure_paid_family(target,'Blocked'); raise exception 'FAIL PRO created family'; exception when insufficient_privilege then null; end;
+  update public.commercial_subscriptions set plan='family' where user_id=auth.uid();
+  code:=public.paid_family_invite(target);
+  if code is null then raise exception 'FAIL no code'; end if;
+  perform public.configure_paid_family(target,'Test family');
+  if (public.my_commercial_access()->>'personalPlan')<>'family' then raise exception 'FAIL personal plan'; end if;
+  select count(*) into notices from public.commercial_notifications where user_id=auth.uid();
+  if notices<>2 then raise exception 'FAIL upgrade notices %',notices; end if;
+  update public.commercial_subscriptions set paid_until=now()+interval '2 months' where user_id=auth.uid();
+  if (select count(*) from public.commercial_notifications where user_id=auth.uid())<>notices then raise exception 'FAIL duplicate renewal notice'; end if;
+  for i in 2..5 loop
+    perform set_config('request.jwt.claims',jsonb_build_object('sub','00000000-0000-4000-8000-'||lpad(i::text,12,'0'),'role','authenticated','aal','aal1')::text,true);
+    perform public.join_household_by_code(code);
+  end loop;
+  if (public.my_commercial_access()->>'plan')<>'family' then raise exception 'FAIL sponsored member'; end if;
+  begin perform public.paid_family_invite(target); raise exception 'FAIL sponsored member invited'; exception when insufficient_privilege then null; end;
+  perform set_config('request.jwt.claims','{"sub":"00000000-0000-4000-8000-000000000006","role":"authenticated","aal":"aal2"}',true);
+  begin perform public.join_household_by_code(code); raise exception 'FAIL sixth member accepted'; exception when raise_exception then if sqlerrm='FAIL sixth member accepted' then raise; end if; end;
+  begin perform public.commercial_admin_authorize_delete(auth.uid(),'test6@example.invalid','Test deletion'); raise exception 'FAIL nonadmin delete'; exception when insufficient_privilege then null; end;
+  perform set_config('request.jwt.claims','{"sub":"00000000-0000-4000-8000-000000000007","role":"authenticated","aal":"aal1"}',true);
+  begin perform public.commercial_admin_authorize_delete('00000000-0000-4000-8000-000000000006','test6@example.invalid','Test deletion'); raise exception 'FAIL AAL1 delete'; exception when insufficient_privilege then null; end;
+  perform set_config('request.jwt.claims','{"sub":"00000000-0000-4000-8000-000000000007","role":"authenticated","aal":"aal2"}',true);
+  event:=public.commercial_admin_authorize_delete('00000000-0000-4000-8000-000000000006','test6@example.invalid','Test deletion');
+  if event is null then raise exception 'FAIL deletion audit'; end if;
+  begin perform public.commercial_admin_authorize_delete(auth.uid(),'test7@example.invalid','Test deletion'); raise exception 'FAIL self deletion'; exception when insufficient_privilege then null; end;
+  update public.commercial_subscriptions set paid_until=now()-interval '1 second' where user_id='00000000-0000-4000-8000-000000000001';
+  perform set_config('request.jwt.claims','{"sub":"00000000-0000-4000-8000-000000000005","role":"authenticated","aal":"aal1"}',true);
+  if public.is_household_member(target) then raise exception 'FAIL sharing survived expiry'; end if;
+  if (public.my_commercial_access()->>'plan')<>'free' then raise exception 'FAIL expired sponsor'; end if;
+  if public.ensure_default_household('Personal workspace')=target then raise exception 'FAIL expired member trapped in family'; end if;
+  perform set_config('request.jwt.claims','{"sub":"00000000-0000-4000-8000-000000000001","role":"authenticated","aal":"aal1"}',true);
+  if not public.is_household_writer(target) then raise exception 'FAIL owner lost own financial data'; end if;
+  if has_table_privilege('authenticated','public.household_members','INSERT') then raise exception 'FAIL direct membership insert'; end if;
+  begin delete from auth.users where id='00000000-0000-4000-8000-000000000007'; raise exception 'FAIL admin deleted'; exception when raise_exception then if sqlerrm='FAIL admin deleted' then raise; end if; end;
+  begin delete from auth.users where id='00000000-0000-4000-8000-000000000001'; raise exception 'FAIL shared owner deleted'; exception when raise_exception then if sqlerrm='FAIL shared owner deleted' then raise; end if; end;
+  insert into public.households(id) values('10000000-0000-4000-8000-000000000006');
+  insert into public.household_members(household_id,user_id,role) values('10000000-0000-4000-8000-000000000006','00000000-0000-4000-8000-000000000006','owner');
+  perform set_config('request.jwt.claims','{}',true);
+  insert into public.app_states values('10000000-0000-4000-8000-000000000006','{"private":true}');
+  delete from auth.users where id='00000000-0000-4000-8000-000000000006';
+  if exists(select 1 from public.app_states where household_id='10000000-0000-4000-8000-000000000006') then raise exception 'FAIL private state orphan'; end if;
+  if (select count(*) from public.household_members where household_id=target)<>5 then raise exception 'FAIL shared data removed'; end if;
+end;
+$$;
+rollback;

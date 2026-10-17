@@ -1,3 +1,4 @@
+import { commercialAccess } from '../_shared/commercial.js';
 const BASE = 'https://api.binance.com';
 const HOUR = 3600000;
 const encoder = new TextEncoder();
@@ -110,6 +111,8 @@ export async function onRequest({ request, env }) {
       await db.prepare('DELETE FROM binance_connections WHERE user_id = ?').bind(user.id).run();
       return json({ connected: false, tokens: [] });
     }
+    const access = await commercialAccess(env, authorization, 'binance');
+    if (access.error) return json({ error: access.error, code: access.code }, access.status);
     const key = await encryptionKey(env);
     if (request.method === 'POST') {
       stage = 'request';

@@ -80,7 +80,7 @@ self.addEventListener("message", (event) => {
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   const url = new URL(event.request.url);
-  if (url.pathname.startsWith('/api/')) {
+  if (url.pathname.startsWith('/api/') || /^\/admin(?:\.html|\.js|\.css)?\/?$/.test(url.pathname)) {
     event.respondWith(fetch(event.request));
     return;
   }
