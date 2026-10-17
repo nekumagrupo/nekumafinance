@@ -28,11 +28,13 @@ assert.match(adminSource,/storageKey:'nekuma-admin-auth-v1'/);
 assert.match(adminSource,/detectSessionInUrl:false/);
 assert.match(adminSource,/signOut\(\{scope:'local'\}\)/);
 
-function element(){return {hidden:true,open:false,textContent:'',disabled:false,value:'',children:[],events:{},append(...items){this.children.push(...items)},replaceChildren(...items){this.children=items},addEventListener(name,cb){this.events[name]=cb},setAttribute(){},removeAttribute(){},showModal(){this.open=true},close(){this.open=false;this.events.close?.()},querySelector(){return element()}};}
-async function adminCase(access,overviewError,{session=true}={}){
+function element(){return {hidden:true,open:false,textContent:'',disabled:false,value:'',children:[],events:{},classList:{add(){}},append(...items){this.children.push(...items)},replaceChildren(...items){this.children=items},addEventListener(name,cb){this.events[name]=cb},setAttribute(){},removeAttribute(){},showModal(){this.open=true},close(){this.open=false;this.events.close?.()},querySelector(){return element()}};}
+async function adminCase(access,overviewError,{session=true,databaseBytes=450000000,isAdminUser=true}={}){
   const nodes=new Map();const get=id=>{if(!nodes.has(id))nodes.set(id,element());return nodes.get(id)};
   const calls=[],requests=[];
   const client={auth:{onAuthStateChange(){},async getSession(){return {data:{session:session?{user:{id:'test'}}:null}}},async signOut(options){assert.equal(options.scope,'local');return {}},async resetPasswordForEmail(email,options){requests.push({email,...options});return {}},mfa:{async getAuthenticatorAssuranceLevel(){return {data:{currentLevel:'aal2'}}}}},async rpc(name,args){calls.push(name);requests.push({name,args});if(name==='my_commercial_access')return {data:access};if(overviewError)return {error:overviewError};if(name==='commercial_admin_user_detail')return {data:{name:'Test user',version:'version-1',audit:[]}};if(name==='commercial_admin_edit_user')return {};if(name==='commercial_admin_recovery_target')return {data:'verified@example.com'};return {data:{users:1,paid:0,trials:1,households:1,financialStateBytes:1024,rows:[{id:'test',email:'<img src=x onerror=alert(1)>',plan:'free',status:'free'}]}}}};
+  const originalRpc=client.rpc.bind(client);
+  client.rpc=async(name,args)=>{const result=await originalRpc(name,args);if(name==='commercial_admin_overview'&&result.data){result.data.databaseBytes=databaseBytes;result.data.rows[0].is_admin=isAdminUser;}return result;};
   const context={document:{getElementById:get,createElement:element},window:{confirm:()=>true,PONTE_SUPABASE_CONFIG:{url:'https://example.com',anonKey:'public'},supabase:{createClient:(url,key,options)=>{assert.equal(options.auth.storageKey,'nekuma-admin-auth-v1');return client}}},Date,Number,String,encodeURIComponent};
   vm.runInNewContext(fs.readFileSync('outputs/finance-pwa/admin.js','utf8'),context);
   await new Promise(resolve=>setImmediate(resolve));
@@ -42,6 +44,10 @@ async function adminCase(access,overviewError,{session=true}={}){
   const denied=await adminCase({isAdmin:false});assert.equal(denied.nodes.get('access').hidden,false);assert.ok(!denied.calls.includes('commercial_admin_overview'));
   const allowed=await adminCase({isAdmin:true});assert.equal(allowed.nodes.get('overview').hidden,false);assert.equal(allowed.nodes.get('users').children[0].children[2].textContent,'<img src=x onerror=alert(1)>');
   assert.equal(allowed.nodes.get('metrics').children.length,6);
+  assert.equal(allowed.nodes.get('metrics').children[5].children[1].textContent,'450.00 / 500 MB');
+  assert.equal(allowed.nodes.get('users').children[0].children[0].children[0].textContent,'ADMIN');
+  assert.equal(allowed.nodes.get('service-usage').children.length,3);
+  assert.match(allowed.nodes.get('service-usage').children[0].children[3].textContent,/Atencao:.*50.00 MB restantes/);
   assert.equal(allowed.nodes.get('users').children[0].children.length,8);
   await allowed.nodes.get('users').children[0].children[7].children[0].events.click();
   await new Promise(resolve=>setImmediate(resolve));
@@ -55,5 +61,8 @@ async function adminCase(access,overviewError,{session=true}={}){
   await allowed.nodes.get('logout').events.click();assert.equal(allowed.nodes.get('login').hidden,false);assert.equal(allowed.nodes.get('users').children.length,0);
   const loggedOut=await adminCase(null,null,{session:false});assert.equal(loggedOut.nodes.get('login').hidden,false);assert.equal(loggedOut.calls.length,0);
   const failed=await adminCase({isAdmin:true},{message:'Administrator required',code:'42501'});assert.equal(failed.nodes.get('access').hidden,false);assert.equal(failed.nodes.get('overview').hidden,true);
+  const missing=await adminCase({isAdmin:true},null,{databaseBytes:null,isAdminUser:false});
+  assert.equal(missing.nodes.get('metrics').children[5].children[1].textContent,'Indisponivel / 500 MB');
+  assert.equal(missing.nodes.get('users').children[0].children[0].children.length,0);
   console.log('PASS: plan catalog, no browser self-upgrade, admin deny/allow/error and safe text rendering. SQL runtime requires staging.');
 })();

@@ -7,7 +7,7 @@
   const labels={free:'Gratis',pro:'PRO',family:'Familia',trialing:'Teste',active:'Ativa',past_due:'Em atraso',canceled:'Cancelada'};
   const status = message => { $('status').textContent=message; };
   function cell(row,value) { const td=document.createElement('td');td.textContent=value;row.append(td); }
-  function clearData() { editing=null;editorEpoch++;if($('user-editor').open)$('user-editor').close();$('user-audit').replaceChildren();$('users').replaceChildren();$('metrics').replaceChildren();$('qr-image').removeAttribute('src');$('otp').value='';$('refresh').disabled=true; }
+  function clearData() { editing=null;editorEpoch++;if($('user-editor').open)$('user-editor').close();$('user-audit').replaceChildren();$('users').replaceChildren();$('metrics').replaceChildren();$('service-usage').replaceChildren();$('service-live-status').textContent='';$('admin-identity').textContent='';$('qr-image').removeAttribute('src');$('otp').value='';$('refresh').disabled=true; }
   function showLogin() { clearData();$('overview').hidden=true;$('mfa').hidden=true;$('access').hidden=true;$('login').hidden=false;$('logout').hidden=true;status(''); }
   function denied(message) { clearData();$('login').hidden=true;$('overview').hidden=true;$('mfa').hidden=true;$('access').hidden=false;$('access-message').textContent=message;status(''); }
   async function overview() {
@@ -21,12 +21,16 @@
       operationsReady=typeof data.blocked==='number';
       $('login').hidden=true;$('access').hidden=true;$('mfa').hidden=true;$('overview').hidden=false;
       $('metrics').replaceChildren();
-      const items=[['Total Usuarios',data.users,'Contas cadastradas'],['Ativos',data.active,'Contas sem bloqueio, teste vigente ou periodo vencido'],['Esgotados',data.expired,'Teste ou plano vencido; acesso Gratis preservado'],['Bloqueados',data.blocked,'Acesso ao aplicativo suspenso pela administracao'],['Testes',data.trials,'Periodos de teste vigentes, sem bloqueio'],['Uso do Banco de Dados Total',data.databaseBytes==null?'Indisponivel':(Number(data.databaseBytes)/1048576).toFixed(2)+' MiB','Tamanho total do PostgreSQL, incluindo tabelas e indices; nao inclui arquivos do Storage ou trafego']];
+      const db=databaseCapacity(data.databaseBytes);
+      const items=[['Total Usuarios',data.users,'Contas cadastradas'],['Ativos',data.active,'Contas sem bloqueio, teste vigente ou periodo vencido'],['Esgotados',data.expired,'Teste ou plano vencido; acesso Gratis preservado'],['Bloqueados',data.blocked,'Acesso ao aplicativo suspenso pela administracao'],['Testes',data.trials,'Periodos de teste vigentes, sem bloqueio'],['Banco de Dados',db.label,'PostgreSQL medido no banco / referencia do Supabase Free (500 MB). Confirme a franquia no painel do provedor. Nao inclui Storage ou trafego']];
       for(const [label,value,hint] of items){const article=document.createElement('article');article.className='metric';article.title=hint;const title=document.createElement('span');title.textContent=label;const amount=document.createElement('strong');amount.textContent=value==null?'--':String(value);article.append(title,amount);$('metrics').append(article);}
+      renderServiceUsage(db);
+      loadServiceUsage(epoch);
       $('users').replaceChildren();
       for(const user of data.rows){
         const tr=document.createElement('tr');
-        cell(tr,user.display_name||'--');
+        const name=document.createElement('td');name.textContent=user.display_name||'--';
+        if(user.is_admin){const admin=document.createElement('span');admin.className='status-badge admin-badge';admin.textContent='ADMIN';name.append(admin);}tr.append(name);
         const password=document.createElement('td');password.append(actionButton('key-round',user.has_password===undefined?'Gerenciar senha':user.has_password?'Redefinir senha':'Definir senha',()=>openUserSection(user,'send-recovery'),!user.email));tr.append(password);
         cell(tr,user.email||user.id);cell(tr,date(user.created_at));cell(tr,date(user.expires_at));
         const state=document.createElement('td'),badge=document.createElement('span');badge.className='status-badge';badge.textContent=labels[user.display_status||user.plan]||user.plan;state.append(badge);
@@ -41,7 +45,55 @@
     }catch(error){if(epoch===sessionEpoch)denied(error.message?.includes('MFA')?'Confirme o autenticador novamente.':error.code==='PGRST202'?'A migracao comercial ainda nao foi aplicada no Supabase.':'Acesso administrativo indisponivel ou nao autorizado.');}
     finally{busy=false;$('refresh').disabled=$('overview').hidden;}
   }
+  function databaseCapacity(bytes){
+    // Published Free allowance is a reference, not a billing API response.
+    const limit=500000000,used=bytes==null?null:Number(bytes);
+    if(used===null||!Number.isFinite(used)||used<0)return {label:'Indisponivel / 500 MB',used:null,limit,percent:null};
+    return {label:(used/1000000).toFixed(2)+' / 500 MB',used,limit,percent:used/limit*100};
+  }
+  function renderServiceUsage(db){
+    const root=$('service-usage');root.replaceChildren();
+    const sections=[
+      ['Supabase · Banco de dados',db.label,db.used===null?'Leitura do banco indisponivel.':Math.max(0,(db.limit-db.used)/1000000).toFixed(2)+' MB restantes na referencia Free. '+db.percent.toFixed(1)+'% utilizado.', 'https://supabase.com/dashboard/project/ysggihygadpfjyywtvyy'],
+      ['Supabase · Outros consumos','Consumo nao conectado','Storage: referencia Free de 1 GB. Trafego, usuarios ativos mensais e conexoes devem ser conferidos no painel do Supabase.','https://supabase.com/dashboard/project/ysggihygadpfjyywtvyy'],
+      ['Resend · Emails','Consumo nao conectado','Referencia Free: 100 emails/dia e 3.000/mes. O total da conta (incluindo SMTP) ainda nao e consultado por este painel.','https://resend.com/settings/usage']
+    ];
+    sections.forEach(([title,value,description,url],index)=>{
+      const section=document.createElement('section'),heading=document.createElement('h3'),amount=document.createElement('strong'),note=document.createElement('p'),link=document.createElement('a');
+      section.className='service-usage-item';heading.textContent=title;amount.textContent=value;note.textContent=description;link.textContent='Conferir no provedor';link.href=url;link.target='_blank';link.rel='noopener noreferrer';section.append(heading,amount);
+      if(index===0&&db.percent!==null){const progress=document.createElement('progress');progress.max=100;progress.value=Math.min(100,db.percent);progress.setAttribute('aria-label','Uso do banco em relacao a referencia Free');section.append(progress);if(db.percent>=80){section.classList.add('usage-warning');note.textContent=(db.percent>=95?'Critico: ':'Atencao: ')+description;}}
+      section.append(note,link);root.append(section);
+    });
+  }
   function editorStatus(message){$('editor-status').textContent=message;}
+  async function loadServiceUsage(epoch){
+    const statusNode=$('service-live-status');statusNode.textContent='Consultando indicadores dos provedores...';
+    try{
+      const {data,error}=await client.auth.getSession();
+      if(epoch!==sessionEpoch)return;
+      if(error||!data?.session?.access_token){statusNode.textContent='Sessao de monitoramento indisponivel.';return;}
+      const response=await fetch('/api/admin/usage',{method:'POST',headers:{Authorization:'Bearer '+data.session.access_token},cache:'no-store'});
+      if(epoch!==sessionEpoch)return;
+      if(!response.ok){statusNode.textContent=response.status===404?'Publique a funcao de monitoramento no Cloudflare para conectar os indicadores.':'Nao foi possivel consultar os provedores. Confira ADMIN/2FA e a configuracao.';return;}
+      const live=await response.json();
+      if(epoch!==sessionEpoch)return;
+      const sections=$('service-usage').children;
+      const reasons={not_configured:'Chave de monitoramento ainda nao configurada no Cloudflare.',credential_permissions:'Chave invalida ou sem permissao de consulta.',no_data:'O provedor nao retornou dados para esta janela.',invalid_response:'Resposta do provedor nao reconhecida.',provider_unavailable:'Provedor indisponivel no momento.'};
+      const note=(section,text)=>{const p=document.createElement('p');p.textContent=text;section.append(p);};
+      const title=(section,text)=>{section.replaceChildren();const h=document.createElement('h3');h.textContent=text;section.append(h);};
+      const meter=(section,label,value)=>{
+        if(!value||typeof value.used!=='number'||!Number.isFinite(value.used)||value.used<0)return note(section,label+': indisponivel');
+        const strong=document.createElement('strong');strong.textContent=label+': '+value.used.toLocaleString('pt-BR')+' / '+(value.limit===null?'Sem limite':Number(value.limit).toLocaleString('pt-BR'));section.append(strong);
+        if(typeof value.limit==='number'&&value.limit>0){const percent=value.used/value.limit*100,progress=document.createElement('progress');progress.max=100;progress.value=Math.min(100,percent);progress.setAttribute('aria-label',label);section.append(progress);note(section,(percent>=95?'Critico: ':percent>=80?'Atencao: ':'')+Math.max(0,value.limit-value.used).toLocaleString('pt-BR')+' restantes · '+percent.toFixed(1)+'% utilizado.');if(percent>=80)section.classList.add('usage-warning');}
+        if(value.resetsAt)note(section,'Renova em '+new Date(value.resetsAt).toLocaleString('pt-BR'));
+      };
+      if(live.resend?.connected){title(sections[2],'Resend · Consumo real da conta');meter(sections[2],'Hoje',live.resend.daily);meter(sections[2],'Mes',live.resend.monthly);note(sections[2],'Medido em '+new Date(live.resend.measuredAt).toLocaleString('pt-BR'));}
+      else note(sections[2],reasons[live.resend?.reason]||'Consulta indisponivel.');
+      if(live.supabase?.connected){title(sections[1],'Supabase · Requisicoes do projeto');for(const [key,label] of [['total_auth_requests','Auth'],['total_rest_requests','Banco/API'],['total_realtime_requests','Realtime'],['total_storage_requests','Storage/API']]){const value=live.supabase.requests?.[key];note(sections[1],label+': '+(typeof value==='number'?value.toLocaleString('pt-BR'):'Indisponivel'));}note(sections[1],'Janela: '+(live.supabase.from?new Date(live.supabase.from).toLocaleString('pt-BR'):'--')+' a '+(live.supabase.to?new Date(live.supabase.to).toLocaleString('pt-BR'):'--')+'. Requisicoes nao equivalem a MB de trafego, arquivos ou usuarios ativos mensais.');}
+      else note(sections[1],reasons[live.supabase?.reason]||'Consulta indisponivel.');
+      statusNode.textContent='Consulta concluida. Cache de ate 5 minutos; indicadores ausentes nao sao considerados zero.';
+    }catch{if(epoch===sessionEpoch)statusNode.textContent='Monitoramento nao conectado. Publique a funcao no Cloudflare e confira os secrets de consulta.';}
+  }
   function actionButton(icon,label,callback,disabled=false){const button=document.createElement('button');button.type='button';button.title=label;button.setAttribute('aria-label',label);button.disabled=Boolean(disabled);const i=document.createElement('i');i.setAttribute('data-lucide',icon);button.append(i);button.addEventListener('click',callback);return button;}
   async function openUserSection(user,id){await openUser(user);if(editing?.id===user.id){$(id).scrollIntoView?.({block:'center'});$(id).focus?.();}}
   function syncManualFields(){const manual=$('edit-mode').value==='manual';$('manual-fields').hidden=!manual;$('edit-until').required=manual&&$('edit-plan').value!=='free';}
@@ -152,6 +204,7 @@
     if(epoch!==sessionEpoch)return;
     if(access.error){denied('A migracao comercial ainda nao foi aplicada ou o acesso esta indisponivel.');return;}
     if(!access.data?.isAdmin){denied('Sua conta nao tem permissao administrativa.');return;}
+    $('admin-identity').textContent='ADMIN · '+(session.user.email||session.user.id);
     const assurance=await client.auth.mfa.getAuthenticatorAssuranceLevel();
     if(epoch!==sessionEpoch)return;
     if(assurance.error){denied('Nao foi possivel validar a seguranca da sessao.');return;}

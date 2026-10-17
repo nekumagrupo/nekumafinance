@@ -15,6 +15,7 @@ const files = [
   "functions/api/receipt-scan.js",
   "functions/_shared/commercial.js",
   "functions/api/admin/delete-user.js",
+  "functions/api/admin/usage.js",
   "functions/_middleware.js",
   "outputs/finance-pwa/service-worker.js",
   "scripts/build-deploy.cjs",

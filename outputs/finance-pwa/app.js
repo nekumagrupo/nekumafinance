@@ -1389,8 +1389,15 @@
     if (remoteSession.household?.name) state.settings.familyName = remoteSession.household.name;
     persistLocalState();
     remoteSession.lastSyncedAt = data?.updated_at || null;
-    if (shouldRewriteRemoteState) await flushRemoteState();
-    if ((!data?.state || !Object.keys(data.state).length) && createIfEmpty) await flushRemoteState();
+    if (shouldRewriteRemoteState || ((!data?.state || !Object.keys(data.state).length) && createIfEmpty)) {
+      try { await flushRemoteState(); }
+      catch (error) {
+        if (!error.planRestricted) throw error;
+        // A rejected reconciliation is not a rejected authentication. Keep pending data.
+        lastLocalChangeAt = Math.max(Date.now(), (Date.parse(remoteSession.lastSyncedAt || "") || 0) + 1);
+        remoteSession.error = error.message;
+      }
+    }
   }
 
   async function loadRemoteHouseholdMembers(householdId = remoteSession.householdId) {
@@ -1523,7 +1530,7 @@
         renderKeepingScroll();
         return;
       }
-      const nextState = withCurrentWorkOwner({ ...state, settings: { ...state.settings, dataMode: "online" } });
+      const nextState = preserveRestrictedRecordFormats(current.data?.state, withCurrentWorkOwner({ ...state, settings: { ...state.settings, dataMode: "online" } }));
       const { data, error } = await remoteStore.client.rpc("save_app_state", {
         target_household_id: remoteSession.householdId,
         app_state: nextState
@@ -1548,9 +1555,12 @@
 
       remoteSession.lastSyncedAt = data || now;
     } catch (error) {
-      if (/PLAN_LIMIT|PLAN_FEATURE/.test(error.message || "")) {
+      if (/PLAN_LIMIT|PLAN_FEATURE|Plano Familia necessario/.test(error.message || "")) {
+        lastLocalChangeAt = Math.max(Date.now(), (Date.parse(remoteSession.lastSyncedAt || "") || 0) + 1);
         await loadCommercialAccess();
-        throw new Error("Seu plano nao permite esta alteracao. Os dados locais foram preservados; revise os limites antes de sincronizar.");
+        const restricted = new Error("Uma alteracao pendente exige outro plano. Seu acesso ao app continua liberado e os dados locais foram preservados.");
+        restricted.planRestricted = true;
+        throw restricted;
       }
       throw error;
     } finally {
@@ -5849,6 +5859,35 @@
 
   function commercialSnapshot() {
     return remoteSession.user?.id && remoteSession.commercialAccess?.userId === remoteSession.user.id ? remoteSession.commercialAccess : null;
+  }
+
+  function preserveRestrictedRecordFormats(rawRemote, nextState) {
+    if (!rawRemote) return nextState;
+    const normalized = normalizeState(rawRemote);
+    const frozen = [];
+    if (!hasCommercialFeature("cards")) frozen.push("creditCards", "cardPurchases");
+    if (!hasCommercialFeature("wealth")) frozen.push("investments", "debts", "nubankBoxes", "nubankBoxContributions");
+    if (!hasCommercialFeature("automation")) frozen.push("categorizationRules");
+    if (!hasCommercialFeature("projections")) frozen.push("projectionScenarios");
+    if (!hasCommercialFeature("receipt_scan")) frozen.push("receipts");
+    if (!hasFamilyAccess()) frozen.push("familyMembers", "familyBusinesses");
+    const result = { ...nextState };
+    for (const key of frozen) {
+      const before = normalized[key] || [];
+      if (JSON.stringify(nextState[key] || []) === JSON.stringify(before)) {
+        if (Object.hasOwn(rawRemote, key)) result[key] = rawRemote[key];
+        else delete result[key];
+        continue;
+      }
+      const rawById = new Map((rawRemote[key] || []).map(row => [row.id, row]));
+      const normalizedById = new Map(before.map(row => [row.id, row]));
+      result[key] = (nextState[key] || []).map(row => rawById.has(row.id) && JSON.stringify(row) === JSON.stringify(normalizedById.get(row.id)) ? rawById.get(row.id) : row);
+    }
+    if (!hasCommercialFeature("metamask") && JSON.stringify(nextState.web3Wallet) === JSON.stringify(normalized.web3Wallet)) {
+      if (Object.hasOwn(rawRemote, "web3Wallet")) result.web3Wallet = rawRemote.web3Wallet;
+      else delete result.web3Wallet;
+    }
+    return result;
   }
 
   function hasCommercialFeature(feature) {

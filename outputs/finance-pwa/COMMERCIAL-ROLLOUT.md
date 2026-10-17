@@ -273,3 +273,56 @@ Production verification: 6 users and 6 financial states preserved; plan trigger
 active; authenticated direct quota UPDATE denied; authenticated reservation RPC
 granted; anonymous reservation denied. Proof: `work/plan-enforcement-v5-active.png`.
 No real paid upgrade, user block or scan submission was performed for testing.
+
+## Downgrade Login and Capacity Follow-up
+
+Login no longer treats a rejected plan-limited reconciliation save as failed
+authentication. Unsynced local changes are retained and marked pending so an
+automatic pull cannot replace them. Other connection/authorization failures still
+propagate. Restricted records that only differ because of client normalization
+are serialized in their original server format; actual edits still reach the
+server plan guard. No migration, plan change or account deletion is needed.
+Regression: `node scripts/verify-downgrade.cjs` (VM and mocked persistence).
+
+ADMIN badges use the database `is_admin` field, not an email string comparison.
+The authenticated administrator identity appears above the overview. Capacity
+shows measured PostgreSQL bytes converted to decimal MB alongside a clearly
+labeled 500 MB Supabase Free reference, remaining space, percent and warnings
+at 80%/95%. This is not a billing-plan API integration. Storage, egress, monthly
+active users and Resend counters are explicitly unavailable; provider links and
+published Free allowances are references, never fabricated consumption totals.
+References checked 2026-10-17:
+https://supabase.com/docs/guides/platform/billing-on-supabase
+https://resend.com/pricing
+
+## Provider Monitor (Cloudflare)
+
+New POST `/api/admin/usage` is limited to the main/admin official host and same
+Origin. Every request invokes the protected ADMIN+AAL2 overview RPC before any
+provider query or cache access. Only aggregate numbers are returned, never user
+rows, provider response bodies, credentials or logs. Browser responses use
+no-store; successful provider aggregates are cached server-side for 5 minutes,
+failures for 30 seconds. Missing data stays unavailable, not zero.
+
+Production secrets (user must generate, enter and save directly in Cloudflare):
+- `RESEND_USAGE_API_KEY`: separate Resend Full Access key. GET api.resend.com/usage
+  returns account-wide email used/limit/remaining and reset timestamps, including
+  daily/monthly windows. Existing support/SMTP sending keys stay unchanged.
+- `SUPABASE_USAGE_TOKEN`: Management API token scoped to the Nekuma project with
+  `analytics_usage_read`, if fine-grained scopes are available. Requests use only
+  GET /v1/projects/{ref}/analytics/endpoints/usage.api-counts. Returned bucket
+  timestamps are displayed as the measured interval. These request counts are
+  NOT monthly billed egress bytes, Storage bytes, MAU or billing allowances.
+
+The PostgreSQL size continues to come from the existing protected overview RPC;
+the 500 MB maximum remains an explicit Free reference rather than an API billing
+allowance. Other billing usage still requires the provider's own dashboard.
+Secret creation/insertion and code publication are pending, not completed.
+Local `scripts/preview-home.cjs` is static and does not emulate Pages Functions;
+the authenticated live monitor can only be tested after Cloudflare deployment.
+
+Test: `node scripts/verify-admin-usage.cjs` (mocked Auth RPC/providers), plus check,
+commercial UI tests and production build. No real email was sent or token created.
+API references checked 2026-10-17:
+https://www.resend.com/docs/api-reference/usage/retrieve-usage
+https://supabase.com/docs/reference/api/v1-get-project-usage-api-count

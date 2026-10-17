@@ -396,6 +396,7 @@
   });
 
   Object.assign(messages["en-US"], {
+    "Uma alteracao pendente exige outro plano. Seu acesso ao app continua liberado e os dados locais foram preservados.": "A pending change requires another plan. You can still access the app and your local data has been preserved.",
     "Disponivel no PRO e Familia. Seus dados existentes continuam salvos.": "Available with PRO and Family. Your existing data stays saved.",
     "Ver planos": "View plans", "Seu plano": "Your plan", "Recurso PRO": "PRO feature",
     "Graficos avancados": "Advanced charts", "Projecao salarial": "Salary forecast",
@@ -404,6 +405,7 @@
     "Ativacao dos limites no servidor pendente.": "Server plan enforcement is pending activation."
   });
   Object.assign(messages["ja-JP"], {
+    "Uma alteracao pendente exige outro plano. Seu acesso ao app continua liberado e os dados locais foram preservados.": "保留中の変更には別のプランが必要です。アプリは引き続き利用でき、端末のデータも保持されています。",
     "Disponivel no PRO e Familia. Seus dados existentes continuam salvos.": "PRO・ファミリープランで利用できます。既存のデータは保存されます。",
     "Ver planos": "プランを見る", "Seu plano": "ご利用プラン", "Recurso PRO": "PRO限定機能",
     "Graficos avancados": "詳細グラフ", "Projecao salarial": "給与予測",
