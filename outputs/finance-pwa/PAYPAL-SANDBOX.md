@@ -70,5 +70,17 @@ Run `node scripts/verify-paypal-ui.cjs` for user-bound status and rendering chec
 - User saved encrypted Sandbox client credentials and the Supabase service-role
   key in Cloudflare. Values were not copied into source.
 - Webhook ID and test user UUID allowlist saved as encrypted Cloudflare settings.
-- New code is not deployed yet; preparing the actual Sandbox catalog, saving its
-  plan IDs and completing a buyer approval/webhook round trip are still pending.
+- Initial integration and upstream-error handling deployed; Sandbox PRO JPY 480
+  and Family JPY 850 plans created and configured. An invalid service-role secret
+  was replaced by the user; authenticated status queries now work.
+- A subscription was created (HTTP 201) and its CREATED webhook was verified and
+  stored. A fresh authenticated query still reports APPROVAL_PENDING and zero
+  confirmed receipts. No paid entitlement or real charge has been enabled.
+- Buyer approval loops back to PayPal login, including the user's external-browser
+  test. Seller detail view also returned a generic PayPal error. These symptoms
+  do not establish the root cause. The original request contains both return URLs.
+- Pending publication: resume bound checkouts using GET and the provider's approve
+  link, without replaying subscription creation. Only APPROVAL_PENDING can resume;
+  binding, plan validation, user allowlist and Sandbox-only gates remain enforced.
+- Mocked HTTP/SQL and UI regression tests pass; completed buyer approval and a
+  verified PAYMENT.SALE.COMPLETED event remain unvalidated.

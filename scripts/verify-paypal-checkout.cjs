@@ -12,6 +12,7 @@ const encode = text => 'data:text/javascript;base64,' + Buffer.from(text).toStri
   const json = data => new Response(JSON.stringify(data));
   const request = (body, headers = {}) => new Request('https://app.nekumafinance.app/api/paypal/checkout', { method: 'POST', headers: { Origin: 'https://app.nekumafinance.app', Authorization: 'Bearer user-token', ...headers }, body: JSON.stringify(body) });
   const binding = { id: 'checkout-1', subscription_id: 'I-TEST', plan: 'pro', created_at: new Date().toISOString() };
+  let bound = false, checkoutState = 'APPROVAL_PENDING', createdSubscriptions = 0;
   let invalidSignature = false, wrongAmount = false, records = 0, calls = 0, adminAllowed = false, databaseDenied = false, expiredSession = false;
   const original = global.fetch;
   global.fetch = async (url, options) => {
@@ -25,13 +26,13 @@ const encode = text => 'data:text/javascript;base64,' + Buffer.from(text).toStri
     if (url.includes('/billing/plans?')) return json({ plans: [{ id: 'P-PRO', name: 'Nekuma Finance PRO Sandbox v1' }, { id: 'P-FAMILY', name: 'Nekuma Finance Familia Sandbox v1' }] });
     if (url.endsWith('/oauth2/token')) return json({ access_token: 'TOKEN' });
     if (url.includes('/billing/plans/')) return json({ id: url.endsWith('P-FAMILY') ? 'P-FAMILY' : 'P-PRO', product_id: 'NEKUMA-FINANCE-SANDBOX-V1', status: 'ACTIVE', billing_cycles: [{ tenure_type: 'REGULAR', frequency: { interval_unit: 'MONTH', interval_count: 1 }, total_cycles: 0, pricing_scheme: { fixed_price: { currency_code: 'JPY', value: url.endsWith('P-FAMILY') ? '850' : '480' } } }] });
-    if (url.endsWith('/paypal_sandbox_reserve')) return json(binding);
+    if (url.endsWith('/paypal_sandbox_reserve')) return json({ ...binding, subscription_id: bound ? binding.subscription_id : null });
     if (url.endsWith('/paypal_sandbox_bind')) return json(true);
-    if (url.endsWith('/billing/subscriptions')) { assert.equal(JSON.parse(options.body).custom_id, binding.id); return json({ id: 'I-TEST', links: [{ rel: 'approve', href: 'https://www.sandbox.paypal.com/approve' }] }); }
+    if (url.endsWith('/billing/subscriptions')) { createdSubscriptions++; assert.equal(JSON.parse(options.body).custom_id, binding.id); return json({ id: 'I-TEST', status: 'APPROVAL_PENDING', links: [{ rel: 'approve', href: 'https://www.sandbox.paypal.com/approve' }] }); }
     if (url.endsWith('/verify-webhook-signature')) return json({ verification_status: invalidSignature ? 'FAILURE' : 'SUCCESS' });
     if (url.endsWith('/paypal_sandbox_lookup')) return json(binding);
     if (url.endsWith('/paypal_sandbox_customer_status')) { assert.equal(JSON.parse(options.body).target_user, 'user-1'); return databaseDenied ? new Response('{}', { status: 401 }) : json({ ...binding, confirmed_receipts: records }); }
-    if (url.endsWith('/billing/subscriptions/I-TEST')) return json({ id: 'I-TEST', custom_id: binding.id, plan_id: 'P-PRO', status: 'ACTIVE' });
+    if (url.endsWith('/billing/subscriptions/I-TEST')) return json({ id: 'I-TEST', custom_id: binding.id, plan_id: 'P-PRO', status: checkoutState, links: [{ rel: 'approve', href: 'https://www.sandbox.paypal.com/approve' }] });
     if (url.includes('/transactions?')) return json({ transactions: [{ id: 'SALE-1', status: 'COMPLETED', amount_with_breakdown: { gross_amount: { currency_code: 'JPY', value: wrongAmount ? '1' : '480' } } }] });
     if (url.endsWith('/paypal_sandbox_record')) { records++; return json(true); }
     throw new Error('Unexpected request ' + url);
@@ -44,6 +45,14 @@ const encode = text => 'data:text/javascript;base64,' + Buffer.from(text).toStri
     assert.equal((await checkout.onRequestPost({ env, request: request({ plan: 'free' }) })).status, 400);
     const response = await checkout.onRequestPost({ env, request: request({ plan: 'pro', price: 1, userId: 'attacker' }) });
     assert.equal(response.status, 200); assert.equal((await response.json()).environment, 'sandbox');
+    assert.equal(createdSubscriptions, 1);
+    bound = true;
+    const resumed = await checkout.onRequestPost({ env, request: request({ plan: 'pro' }) });
+    assert.equal(resumed.status, 200);
+    assert.equal(createdSubscriptions, 1, 'Bound checkout must resume by GET, not create another subscription');
+    checkoutState = 'ACTIVE';
+    assert.equal((await checkout.onRequestPost({ env, request: request({ plan: 'pro' }) })).status, 409);
+    assert.equal(createdSubscriptions, 1);
     const event = { id: 'EV-1', event_type: 'PAYMENT.SALE.COMPLETED', resource: { id: 'SALE-1', billing_agreement_id: 'I-TEST', create_time: new Date(Date.now() - 1000).toISOString() } };
     const headers = { 'paypal-auth-algo': 'SHA256withRSA', 'paypal-cert-url': 'https://api.sandbox.paypal.com/v1/notifications/certs/TEST', 'paypal-transmission-id': 'TX-1', 'paypal-transmission-sig': 'signature', 'paypal-transmission-time': new Date().toISOString() };
     const deliver = () => webhook.onRequestPost({ env, request: request(event, headers) });

@@ -14,6 +14,10 @@ function render(snapshot, userId = 'owner') {
 assert.ok(!render({ userId: 'other', available: true, status: 'not_started' }).includes('Testar PRO'));
 assert.ok(!render({ userId: 'owner', available: false, status: 'not_configured' }).includes('Testar PRO'));
 assert.ok(render({ userId: 'owner', available: true, status: 'not_started' }).includes('Testar PRO'));
+assert.ok(render({ userId: 'owner', available: true, status: 'APPROVAL_PENDING', plan: 'pro' }).includes('Retomar teste PayPal'));
+assert.ok(!render({ userId: 'other', available: true, status: 'APPROVAL_PENDING', plan: 'pro' }).includes('Retomar teste PayPal'));
+assert.ok(!render({ userId: 'owner', available: true, status: 'ACTIVE', plan: 'pro' }).includes('Retomar teste PayPal'));
+assert.ok(!render({ userId: 'owner', available: true, status: 'APPROVAL_PENDING', plan: '<script>' }).includes('Retomar teste PayPal'));
 assert.ok(render({ userId: 'owner', available: true, status: 'APPROVED', confirmedReceipts: 0 }).includes('aguardando pagamento'));
 assert.ok(!render({ userId: 'owner', available: true, status: 'ACTIVE', confirmedReceipts: 0 }).includes('plano atualizado'));
 assert.ok(render({ userId: 'owner', error: '<img src=x onerror=alert(1)>' }).includes('&lt;img'));
