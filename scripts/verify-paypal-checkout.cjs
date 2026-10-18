@@ -12,13 +12,13 @@ const encode = text => 'data:text/javascript;base64,' + Buffer.from(text).toStri
   const json = data => new Response(JSON.stringify(data));
   const request = (body, headers = {}) => new Request('https://app.nekumafinance.app/api/paypal/checkout', { method: 'POST', headers: { Origin: 'https://app.nekumafinance.app', Authorization: 'Bearer user-token', ...headers }, body: JSON.stringify(body) });
   const binding = { id: 'checkout-1', subscription_id: 'I-TEST', plan: 'pro', created_at: new Date().toISOString() };
-  let invalidSignature = false, wrongAmount = false, records = 0, calls = 0, adminAllowed = false;
+  let invalidSignature = false, wrongAmount = false, records = 0, calls = 0, adminAllowed = false, databaseDenied = false, expiredSession = false;
   const original = global.fetch;
   global.fetch = async (url, options) => {
     calls++; assert.equal(options.redirect, 'manual');
     url = String(url);
     assert.ok(!url.includes('api-m.paypal.com'), 'Live API forbidden');
-    if (url.endsWith('/auth/v1/user')) return json({ id: 'user-1' });
+    if (url.endsWith('/auth/v1/user')) return expiredSession ? new Response('{}', { status: 401 }) : json({ id: 'user-1' });
     if (url.endsWith('/my_commercial_access')) return json({ enforcementActive: true });
     if (url.endsWith('/commercial_admin_overview')) return adminAllowed ? json({ rows: [] }) : new Response('{}', { status: 403 });
     if (url.includes('/catalogs/products/')) return json({ id: 'NEKUMA-FINANCE-SANDBOX-V1', type: 'SERVICE' });
@@ -30,7 +30,7 @@ const encode = text => 'data:text/javascript;base64,' + Buffer.from(text).toStri
     if (url.endsWith('/billing/subscriptions')) { assert.equal(JSON.parse(options.body).custom_id, binding.id); return json({ id: 'I-TEST', links: [{ rel: 'approve', href: 'https://www.sandbox.paypal.com/approve' }] }); }
     if (url.endsWith('/verify-webhook-signature')) return json({ verification_status: invalidSignature ? 'FAILURE' : 'SUCCESS' });
     if (url.endsWith('/paypal_sandbox_lookup')) return json(binding);
-    if (url.endsWith('/paypal_sandbox_customer_status')) { assert.equal(JSON.parse(options.body).target_user, 'user-1'); return json({ ...binding, confirmed_receipts: records }); }
+    if (url.endsWith('/paypal_sandbox_customer_status')) { assert.equal(JSON.parse(options.body).target_user, 'user-1'); return databaseDenied ? new Response('{}', { status: 401 }) : json({ ...binding, confirmed_receipts: records }); }
     if (url.endsWith('/billing/subscriptions/I-TEST')) return json({ id: 'I-TEST', custom_id: binding.id, plan_id: 'P-PRO', status: 'ACTIVE' });
     if (url.includes('/transactions?')) return json({ transactions: [{ id: 'SALE-1', status: 'COMPLETED', amount_with_breakdown: { gross_amount: { currency_code: 'JPY', value: wrongAmount ? '1' : '480' } } }] });
     if (url.endsWith('/paypal_sandbox_record')) { records++; return json(true); }
@@ -54,6 +54,12 @@ const encode = text => 'data:text/javascript;base64,' + Buffer.from(text).toStri
     assert.equal(pending.status, 200);
     const snapshot = await pending.json(); assert.equal(snapshot.status, 'ACTIVE'); assert.equal(snapshot.confirmedReceipts, 1);
     assert.ok(!JSON.stringify(snapshot).includes('SERVER-SECRET')); assert.ok(!JSON.stringify(snapshot).includes('checkout-1'));
+    databaseDenied = true;
+    const dbFailure = await status.onRequestPost({ env, request: request({}) });
+    assert.equal(dbFailure.status, 424); assert.match((await dbFailure.json()).error, /banco.*HTTP 401/);
+    databaseDenied = false; expiredSession = true;
+    assert.equal((await status.onRequestPost({ env, request: request({}) })).status, 401);
+    expiredSession = false;
     assert.equal((await status.onRequestPost({ env, request: request({}, { Origin: 'https://evil.invalid' }) })).status, 403);
     assert.equal((await status.onRequestPost({ env: { ...env, PAYPAL_SANDBOX_TEST_USERS: '' }, request: request({}) })).status, 403);
     const unconfigured = await status.onRequestPost({ env: { ...env, PAYPAL_BILLING_MODE: '' }, request: request({}) });

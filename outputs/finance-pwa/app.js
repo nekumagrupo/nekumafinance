@@ -4953,6 +4953,7 @@
     try {
       const token = await currentSupabaseAccessToken();
       const response = await fetch("/api/paypal/checkout", { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ plan }) });
+      if (!(response.headers.get("Content-Type") || "").includes("application/json")) throw new Error(`Pagamento temporariamente indisponivel (HTTP ${response.status}).`);
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Checkout indisponivel.");
       const url = new URL(data.approvalUrl);
@@ -4969,6 +4970,7 @@
     try {
       const token = await currentSupabaseAccessToken();
       const response = await fetch("/api/paypal/status", { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: "{}" });
+      if (!(response.headers.get("Content-Type") || "").includes("application/json")) throw new Error(`Pagamento temporariamente indisponivel (HTTP ${response.status}).`);
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Consulta indisponivel.");
       if (remoteSession.user?.id === userId) paypalSandboxStatus = { ...data, userId };

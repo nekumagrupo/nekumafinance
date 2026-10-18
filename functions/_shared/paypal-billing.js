@@ -10,13 +10,13 @@ export function configuration(env) {
 }
 export async function http(url, options = {}) {
   const response = await fetch(url, { ...options, redirect: 'manual', signal: AbortSignal.timeout(15000) });
-  if (!response.ok) throw Object.assign(new Error('Nao foi possivel confirmar a operacao no provedor.'), { status: 502, providerStatus: response.status });
+  if (!response.ok) throw Object.assign(new Error('Nao foi possivel confirmar a operacao no provedor.'), { status: 424, providerStatus: response.status });
   return response.json();
 }
 export async function database(env, name, args) {
   return http(env.SUPABASE_URL.replace(/\/$/, '') + '/rest/v1/rpc/' + name, {
     method: 'POST', headers: { apikey: env.SUPABASE_SERVICE_ROLE_KEY, Authorization: 'Bearer ' + env.SUPABASE_SERVICE_ROLE_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify(args)
-  });
+  }).catch(error => fail(424, 'Consulta de pagamentos indisponivel no banco' + (error.providerStatus ? ' (HTTP ' + error.providerStatus + ')' : '') + '.'));
 }
 export async function paypal(env) {
   const auth = await http(API + '/v1/oauth2/token', { method: 'POST', headers: { Authorization: 'Basic ' + btoa(env.PAYPAL_SANDBOX_CLIENT_ID + ':' + env.PAYPAL_SANDBOX_CLIENT_SECRET), 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'grant_type=client_credentials' });
@@ -31,8 +31,8 @@ export async function customer(request, env, { admin = false } = {}) {
   if (!authorization.startsWith('Bearer ')) fail(401, 'Entre na sua conta.');
   if (!env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) fail(503, 'Autenticacao indisponivel.');
   const headers = { apikey: env.SUPABASE_ANON_KEY, Authorization: authorization };
-  const user = await http(env.SUPABASE_URL.replace(/\/$/, '') + '/auth/v1/user', { headers });
-  const access = await http(env.SUPABASE_URL.replace(/\/$/, '') + '/rest/v1/rpc/my_commercial_access', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: '{}' });
+  const user = await http(env.SUPABASE_URL.replace(/\/$/, '') + '/auth/v1/user', { headers }).catch(error => fail(error.providerStatus === 401 || error.providerStatus === 403 ? 401 : 503, error.providerStatus === 401 || error.providerStatus === 403 ? 'Sessao expirada. Entre novamente.' : 'Validacao da sessao indisponivel.'));
+  const access = await http(env.SUPABASE_URL.replace(/\/$/, '') + '/rest/v1/rpc/my_commercial_access', { method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: '{}' }).catch(error => fail(error.providerStatus === 403 ? 403 : 503, 'Nao foi possivel validar o acesso desta conta.'));
   if (!user.id || access.blocked || !access.enforcementActive) fail(403, 'Conta indisponivel para contratacao.');
   if (admin) {
     // This database RPC requires both commercial_admins membership and AAL2.
