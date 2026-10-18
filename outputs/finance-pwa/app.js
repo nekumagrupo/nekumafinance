@@ -434,6 +434,8 @@
     saving: false
   };
   let remoteSaveTimer = null;
+  let paypalSandboxStatus = null;
+  let paypalSandboxLoading = false;
   let remoteSaveQueue = Promise.resolve();
   let resetInProgress = false;
   let stateGeneration = 0;
@@ -495,6 +497,8 @@
     }
     if (action === "none") return;
     if (action === "view-plans") { closeModal(); state.ui.activeTab = "plans"; render(); return; }
+    if (action === "paypal-sandbox-checkout") { startPaypalSandboxCheckout(event.target.closest("[data-plan]")?.dataset.plan); return; }
+    if (action === "paypal-sandbox-status") { loadPaypalSandboxStatus(); return; }
     if (action === "set-auth-view") {
       authView = button.dataset.view || "welcome";
       if (authView === "reset" && !isPasswordRecoveryLink) passwordRecoveryStep = "request";
@@ -4939,6 +4943,46 @@
     return renderVerifiedPlansPage();
   }
 
+  async function startPaypalSandboxCheckout(plan) {
+    if (!["pro", "family"].includes(plan)) return;
+    const confirmation = "Teste PayPal Sandbox: sem cobranca real e sem alteracao do seu plano. Continuar?";
+    if (!window.confirm(i18n?.t(confirmation, activeLanguage()) || confirmation)) return;
+    const button = document.querySelector(`[data-action="paypal-sandbox-checkout"][data-plan="${plan}"]`);
+    if (button?.disabled) return;
+    if (button) button.disabled = true;
+    try {
+      const token = await currentSupabaseAccessToken();
+      const response = await fetch("/api/paypal/checkout", { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ plan }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Checkout indisponivel.");
+      const url = new URL(data.approvalUrl);
+      if (url.origin !== "https://www.sandbox.paypal.com" || data.environment !== "sandbox") throw new Error("Destino invalido.");
+      window.location.assign(url.href);
+    } catch (error) { showToast(error.message || "Checkout indisponivel."); if (button) button.disabled = false; }
+  }
+
+  async function loadPaypalSandboxStatus() {
+    if (paypalSandboxLoading || !remoteSession.user?.id) return;
+    const userId = remoteSession.user.id;
+    paypalSandboxLoading = true;
+    render();
+    try {
+      const token = await currentSupabaseAccessToken();
+      const response = await fetch("/api/paypal/status", { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: "{}" });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Consulta indisponivel.");
+      if (remoteSession.user?.id === userId) paypalSandboxStatus = { ...data, userId };
+    } catch (error) {
+      if (remoteSession.user?.id === userId) paypalSandboxStatus = { userId, error: error.message || "Consulta indisponivel." };
+    } finally { paypalSandboxLoading = false; render(); }
+  }
+
+  function renderPaypalSandboxStatus() {
+    const snapshot = paypalSandboxStatus?.userId === remoteSession.user?.id ? paypalSandboxStatus : null;
+    const labels = { not_started: "Nenhum checkout iniciado", not_configured: "Configuracao de testes pendente", PENDING_BINDING: "Checkout em preparacao", APPROVAL_PENDING: "Aguardando aprovacao no PayPal", APPROVED: "Assinatura aprovada; aguardando pagamento", ACTIVE: "Assinatura ativa no PayPal", SUSPENDED: "Assinatura suspensa", CANCELLED: "Assinatura cancelada", EXPIRED: "Assinatura encerrada" };
+    return `<section class="content-panel"><div class="panel-head"><div><h2>Pagamento</h2><p class="row-meta">Contratacao comercial ainda indisponivel.</p></div><button type="button" class="small-action" data-action="paypal-sandbox-status" ${paypalSandboxLoading ? "disabled" : ""}>${paypalSandboxLoading ? "Consultando..." : "Consultar teste PayPal"}</button></div><div role="status" aria-live="polite">${snapshot?.error ? `<p>${escapeHtml(snapshot.error)}</p>` : snapshot ? `<p>${escapeHtml(labels[snapshot.status] || "Aguardando confirmacao")}</p>` : ""}${snapshot?.available ? `<p>Sandbox: sem cobranca real e sem alteracao do plano do aplicativo.</p><p><span>Comprovantes de teste validados:</span> ${number(snapshot.confirmedReceipts || 0)}</p>${snapshot.lastConfirmedAt ? `<p class="row-meta"><span>Ultima confirmacao recebida:</span> ${escapeHtml(new Date(snapshot.lastConfirmedAt).toLocaleString())}</p>` : ""}${snapshot.status === "not_started" ? `<button type="button" class="small-action" data-action="paypal-sandbox-checkout" data-plan="pro">Testar PRO</button> <button type="button" class="small-action" data-action="paypal-sandbox-checkout" data-plan="family">Testar Familia</button>` : ""}` : ""}</div></section>`;
+  }
+
   async function loadCommercialAccess() {
     remoteSession.commercialAccess = null;
     if (!remoteSession.user || !remoteStore.enabled) return;
@@ -4971,7 +5015,8 @@
     };
     const labels = { free: "Gratis", pro: "PRO", family: "Familia" };
     return `<div class="detail-page-shell commercial-page">
-      ${renderPageIntro("Planos Nekuma", "Seu plano e seus recursos", "Dados preservados em qualquer plano. A contratacao ainda nao esta disponivel.")}
+      ${renderPageIntro("Planos Nekuma", "Seu plano e seus recursos", "Dados preservados em qualquer plano. Contratacao comercial ainda indisponivel.")}
+      ${renderPaypalSandboxStatus()}
       <section class="content-panel"><h2>${access ? `Plano ${labels[current]}` : "Plano aguardando validacao"}</h2>
         <p class="row-meta">${access ? "Informacao consultada no servidor." : "A base comercial precisa estar disponivel no Supabase para confirmar seu acesso."}</p>
         ${access?.status === "trialing" && access.trialEndsAt ? `<p>Teste ate ${escapeHtml(new Date(access.trialEndsAt).toLocaleString())}</p>` : ""}

@@ -414,6 +414,31 @@
     "Ativacao dos limites no servidor pendente.": "サーバー側の利用制限は有効化待ちです。"
   });
 
+  Object.assign(messages["en-US"], {
+    "Pagamento": "Payment", "Contratacao comercial ainda indisponivel.": "Paid subscriptions are not available yet.",
+    "Consultar teste PayPal": "Check PayPal test", "Consultando...": "Checking...", "Nenhum checkout iniciado": "No checkout started",
+    "Configuracao de testes pendente": "Test configuration pending", "Checkout em preparacao": "Preparing checkout",
+    "Aguardando aprovacao no PayPal": "Awaiting PayPal approval", "Assinatura aprovada; aguardando pagamento": "Subscription approved; awaiting payment",
+    "Assinatura ativa no PayPal": "Subscription active on PayPal", "Assinatura suspensa": "Subscription suspended", "Assinatura cancelada": "Subscription cancelled", "Assinatura encerrada": "Subscription ended",
+    "Sandbox: sem cobranca real e sem alteracao do plano do aplicativo.": "Sandbox: no real charge and no change to your app plan.",
+    "Comprovantes de teste validados:": "Verified test receipts:", "Ultima confirmacao recebida:": "Last confirmation received:",
+    "Testar PRO": "Test PRO", "Testar Familia": "Test Family", "Checkout indisponivel.": "Checkout unavailable.",
+    "Checkout de teste ainda nao configurado.": "Test checkout is not configured yet.", "Checkout disponivel apenas para contas de teste autorizadas.": "Checkout is available only to authorized test accounts.",
+    "Teste PayPal Sandbox: sem cobranca real e sem alteracao do seu plano. Continuar?": "PayPal Sandbox test: no real charge and no change to your plan. Continue?"
+  });
+  Object.assign(messages["ja-JP"], {
+    "Pagamento": "お支払い", "Contratacao comercial ainda indisponivel.": "有料プランのお申し込みはまだご利用いただけません。",
+    "Consultar teste PayPal": "PayPalテストを確認", "Consultando...": "確認中...", "Nenhum checkout iniciado": "お申し込みは開始されていません",
+    "Configuracao de testes pendente": "テスト環境の設定待ち", "Checkout em preparacao": "お申し込みを準備中",
+    "Aguardando aprovacao no PayPal": "PayPalでの承認待ち", "Assinatura aprovada; aguardando pagamento": "定期支払い承認済み・入金確認待ち",
+    "Assinatura ativa no PayPal": "PayPalの定期支払いが有効", "Assinatura suspensa": "定期支払いは一時停止中", "Assinatura cancelada": "定期支払いはキャンセル済み", "Assinatura encerrada": "定期支払いは終了しました",
+    "Sandbox: sem cobranca real e sem alteracao do plano do aplicativo.": "Sandbox：実際の請求やアプリのプラン変更は行いません。",
+    "Comprovantes de teste validados:": "確認済みのテスト入金件数：", "Ultima confirmacao recebida:": "最終確認受信日時：",
+    "Testar PRO": "PROをテスト", "Testar Familia": "家族プランをテスト", "Checkout indisponivel.": "お申し込みを利用できません。",
+    "Checkout de teste ainda nao configurado.": "テスト環境はまだ設定されていません。", "Checkout disponivel apenas para contas de teste autorizadas.": "承認されたテストアカウントのみ利用できます。",
+    "Teste PayPal Sandbox: sem cobranca real e sem alteracao do seu plano. Continuar?": "PayPal Sandboxテスト：実際の請求やプラン変更は行いません。続けますか？"
+  });
+
   const foldedMessages = Object.fromEntries(Object.entries(messages).map(([locale, dictionary]) => [
     locale,
     Object.fromEntries(Object.entries(dictionary).map(([source, translation]) => [fold(source), translation]))

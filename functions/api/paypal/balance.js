@@ -52,7 +52,7 @@ export async function onRequestGet({ request, env }) {
 
 async function requireAuthorizedUser(request, env) {
   const requireAuth = String(env.PAYPAL_REQUIRE_AUTH || "true").toLowerCase() !== "false";
-  if (!requireAuth) return { user: null };
+  if (!requireAuth) return { response: jsonResponse({ error: "Consulta privada exige autenticacao." }, 403) };
 
   const authHeader = request.headers.get("Authorization") || "";
   if (!authHeader.startsWith("Bearer ")) {
@@ -88,7 +88,7 @@ async function requireAuthorizedUser(request, env) {
     .split(",")
     .map((email) => email.trim().toLowerCase())
     .filter(Boolean);
-  if (allowedEmails.length && !allowedEmails.includes(String(user.email || "").toLowerCase())) {
+  if (!allowedEmails.length || !allowedEmails.includes(String(user.email || "").toLowerCase())) {
     return {
       response: jsonResponse({ error: "Seu usuario nao esta autorizado a consultar este PayPal." }, 403)
     };

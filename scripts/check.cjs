@@ -1,6 +1,11 @@
 const { spawnSync } = require("child_process");
 
 const files = [
+  "functions/_shared/paypal-billing.js",
+  "functions/api/paypal/checkout.js",
+  "functions/api/paypal/webhook.js",
+  "functions/api/paypal/status.js",
+  "functions/api/paypal/setup.js",
   "outputs/finance-pwa/app.js",
   "outputs/finance-pwa/home.js",
   "outputs/finance-pwa/admin.js",

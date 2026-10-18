@@ -17,7 +17,7 @@ export async function onRequest(context) {
       return Response.redirect(url.href, 302);
     }
     const adminAsset = /^\/(?:admin\.(?:css|js)|supabase-config\.js|assets\/(?:nekuma-logo-192\.png|vendor\/lucide\.min\.js))$/.test(url.pathname);
-    if (!adminPath && !adminAsset && !["/api/admin/delete-user", "/api/admin/usage"].includes(url.pathname)) return new Response("Not found", { status: 404, headers: { "Cache-Control": "no-store" } });
+    if (!adminPath && !adminAsset && !["/api/admin/delete-user", "/api/admin/usage", "/api/paypal/setup"].includes(url.pathname)) return new Response("Not found", { status: 404, headers: { "Cache-Control": "no-store" } });
     return context.next();
   }
   if (adminPath && (url.hostname === APP_HOST || legacyHost)) {

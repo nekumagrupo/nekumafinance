@@ -7,7 +7,7 @@
   const labels={free:'Gratis',pro:'PRO',family:'Familia',trialing:'Teste',active:'Ativa',past_due:'Em atraso',canceled:'Cancelada'};
   const status = message => { $('status').textContent=message; };
   function cell(row,value) { const td=document.createElement('td');td.textContent=value;row.append(td); }
-  function clearData() { editing=null;editorEpoch++;if($('user-editor').open)$('user-editor').close();$('user-audit').replaceChildren();$('users').replaceChildren();$('metrics').replaceChildren();$('service-usage').replaceChildren();$('service-live-status').textContent='';$('admin-identity').textContent='';$('qr-image').removeAttribute('src');$('otp').value='';$('refresh').disabled=true; }
+  function clearData() { editing=null;editorEpoch++;if($('user-editor').open)$('user-editor').close();$('user-audit').replaceChildren();$('users').replaceChildren();$('metrics').replaceChildren();$('service-usage').replaceChildren();$('service-live-status').textContent='';$('paypal-setup-status').textContent='';$('paypal-setup').disabled=false;$('admin-identity').textContent='';$('qr-image').removeAttribute('src');$('otp').value='';$('refresh').disabled=true; }
   function showLogin() { clearData();$('overview').hidden=true;$('mfa').hidden=true;$('access').hidden=true;$('login').hidden=false;$('logout').hidden=true;status(''); }
   function denied(message) { clearData();$('login').hidden=true;$('overview').hidden=true;$('mfa').hidden=true;$('access').hidden=false;$('access-message').textContent=message;status(''); }
   async function overview() {
@@ -269,6 +269,19 @@
       $('otp').value='';$('qr-image').removeAttribute('src');$('qr').hidden=true;await overview();
     }catch{status('Codigo invalido ou expirado. Tente novamente.');}
     finally{button.disabled=false;}
+  });
+  $('paypal-setup').addEventListener('click',async()=>{
+    if(busy||$('paypal-setup').disabled||!window.confirm('Preparar ou reutilizar os planos PayPal Sandbox PRO JPY 480 e Familia JPY 850? Sem cobrancas reais.'))return;
+    const epoch=sessionEpoch;
+    const button=$('paypal-setup');button.disabled=true;$('paypal-setup-status').textContent='Verificando ADMIN e preparando catalogo de testes...';
+    try{
+      const {data,error}=await client.auth.getSession();if(error||!data.session)throw new Error('Sessao expirada.');
+      const response=await fetch('/api/paypal/setup',{method:'POST',headers:{Authorization:'Bearer '+data.session.access_token,'Content-Type':'application/json'},body:JSON.stringify({confirm:'CREATE_SANDBOX_CATALOG'})});
+      const result=await response.json();if(!response.ok)throw new Error(result.error||'Nao foi possivel preparar os planos.');
+      if(epoch!==sessionEpoch)return;
+      if(result.environment!=='sandbox'||!/^P-[A-Z0-9]+$/.test(result.plans?.pro||'')||!/^P-[A-Z0-9]+$/.test(result.plans?.family||''))throw new Error('Resposta de configuracao invalida.');
+      $('paypal-setup-status').textContent='Planos de teste verificados. Configure no Cloudflare: PAYPAL_SANDBOX_PRO_PLAN_ID='+result.plans.pro+'; PAYPAL_SANDBOX_FAMILY_PLAN_ID='+result.plans.family+'. Reimplante antes de testar o checkout.';
+    }catch(error){if(epoch===sessionEpoch)$('paypal-setup-status').textContent=error.message||'Preparacao indisponivel.';}finally{if(epoch===sessionEpoch)button.disabled=false;}
   });
   $('refresh').addEventListener('click',overview);
   $('previous').addEventListener('click',()=>{if(!busy&&page>0){page--;overview();}});
