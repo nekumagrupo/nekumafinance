@@ -120,5 +120,29 @@ Run `node scripts/verify-paypal-ui.cjs` for user-bound status and rendering chec
   missing JP keys, cross-merchant webhook rejection and browser RPC denial.
   The user saved the three separate JP client ID, client secret and webhook ID
   settings in Cloudflare; encrypted entries were verified without opening values.
-  Credential validity, normal catalog configuration, publication and app-bound
-  payment remain pending.
+  The JP catalog was subsequently prepared, configured and deployed. The user
+  completed the integrated checkout and reported one validated test receipt.
+
+## Paid-period simulation (v9)
+
+- v9 applied in Supabase on 2026-10-21. Audit confirmed six users preserved,
+  authenticated table reads/RPC execution denied, service-role execution allowed.
+- Apply `supabase-paypal-ledger-v9.sql` before publishing with
+  `PAYPAL_SANDBOX_LEDGER_ENABLED=true`. Private periods and refund/reversal holds
+  are server-only; commercial subscriptions and financial records are untouched.
+- A simulated paid period requires a completed transaction with the expected JPY
+  amount, matching the subscription's last payment and a valid next billing date.
+  Approval or a receipt count alone never grants a period. Duplicate payment IDs
+  cannot extend validity, and holds survive out-of-order payment events.
+- The status endpoint can reconcile the latest payment within forty days on
+  demand. This is not a scheduled reconciliation job or a full historical import.
+  Missing provider billing dates do not produce invented validity periods.
+- Cancelled subscriptions can retain an already recorded paid period without
+  expected renewal. Suspended subscriptions do not show active simulation.
+  Refunds, including partial refunds, and reversals place a conservative hold;
+  automatic restoration after review is not implemented.
+- The UI labels this explicitly as a simulated Sandbox plan. It does not unlock
+  commercial features or modify the user's real Free/PRO/Family subscription.
+- Run `node scripts/verify-paypal-ledger.cjs` for mock provider and disposable
+  PostgreSQL checks. Production reconciliation/display still requires deployment
+  and an authenticated status query; local tests are not live-payment evidence.

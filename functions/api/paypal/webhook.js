@@ -1,4 +1,4 @@
-import { reply, fail, configuration, paypal, database, boundedJson, validateBinding, billingEnvironment } from '../../_shared/paypal-billing.js';
+import { reply, fail, configuration, paypal, database, boundedJson, validateBinding, billingEnvironment, storeSandboxPeriod } from '../../_shared/paypal-billing.js';
 
 export async function onRequestPost({ request, env }) {
   return handleWebhook({ request, env }, 'legacy');
@@ -22,7 +22,12 @@ export async function handleWebhook({ request, env }, profile) {
     const sale = event.event_type === 'PAYMENT.SALE.COMPLETED';
     const subscriptionEvent = String(event.event_type || '').startsWith('BILLING.SUBSCRIPTION.');
     if (!sale && !subscriptionEvent) {
-      // Refund/reversal events are queued for review; this Sandbox never grants real access.
+      if (env.PAYPAL_SANDBOX_LEDGER_ENABLED === 'true' && ['PAYMENT.SALE.REFUNDED', 'PAYMENT.SALE.REVERSED'].includes(event.event_type)) {
+        const paymentId = event.event_type === 'PAYMENT.SALE.REFUNDED' ? event.resource?.sale_id : event.resource?.id;
+        if (typeof paymentId !== 'string' || !/^[A-Za-z0-9-]{1,200}$/.test(paymentId)) fail(400, 'Referencia de pagamento ausente.');
+        await database(env, 'paypal_sandbox_hold_payment', { target_profile: plans.merchantProfile, target_payment: paymentId, target_event: event.id, target_reason: event.event_type });
+      }
+      // Signed refunds/partial refunds/reversals require review; replays never clear holds.
       await database(env, 'paypal_sandbox_review', { event_key: event.id, event_kind: String(event.event_type || '').slice(0, 100) });
       return reply({ received: true, review: true });
     }
@@ -43,6 +48,7 @@ export async function handleWebhook({ request, env }, profile) {
       const amount = confirmed?.amount_with_breakdown?.gross_amount;
       if (!confirmed || amount?.currency_code !== 'JPY' || Number(amount.value) !== (binding.plan === 'pro' ? 480 : 850)) fail(400, 'Pagamento nao confirmado.');
       payment = confirmed.id;
+      await storeSandboxPeriod(env, binding, sub, confirmed);
     }
     await database(env, 'paypal_sandbox_record', { checkout_id: binding.id, event_key: event.id, event_kind: event.event_type, provider_status: sub.status, payment_id: payment });
     return reply({ received: true, environment: 'sandbox' });

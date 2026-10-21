@@ -65,6 +65,50 @@ export function validatePlan(plan, key) {
   const cycle = plan.billing_cycles;
   if (plan.status !== 'ACTIVE' || !Array.isArray(cycle) || cycle.length !== 1 || cycle[0].tenure_type !== 'REGULAR' || cycle[0].frequency?.interval_unit !== 'MONTH' || cycle[0].frequency?.interval_count !== 1 || cycle[0].total_cycles !== 0 || cycle[0].pricing_scheme?.fixed_price?.currency_code !== 'JPY' || Number(cycle[0].pricing_scheme.fixed_price.value) !== (key === 'pro' ? 480 : 850) || Number(plan.payment_preferences?.setup_fee?.value || 0) !== 0 || Number(plan.taxes?.percentage || 0) !== 0 || plan.quantity_supported) fail(503, 'Configuracao do plano PayPal divergente.');
 }
+export function confirmedSandboxPeriod(subscription, transaction, plan) {
+  const expected = plan === 'pro' ? 480 : plan === 'family' ? 850 : NaN;
+  const gross = transaction?.amount_with_breakdown?.gross_amount;
+  const last = subscription.billing_info?.last_payment;
+  const from = Date.parse(transaction?.time);
+  const until = Date.parse(subscription.billing_info?.next_billing_time);
+  // Do not invent a paid month from approval, receipt count or an estimated date.
+  if (transaction?.status !== 'COMPLETED' || !transaction.id || gross?.currency_code !== 'JPY' || Number(gross.value) !== expected
+    || last?.amount?.currency_code !== 'JPY' || Number(last.amount.value) !== expected
+    || !Number.isFinite(from) || from > Date.now() + 300000 || from !== Date.parse(last.time)
+    || !Number.isFinite(until) || until <= from || until - from > 32 * 86400000) return null;
+  return { payment: transaction.id, from: new Date(from).toISOString(), until: new Date(until).toISOString() };
+}
+export async function storeSandboxPeriod(env, binding, subscription, transaction) {
+  if (env.PAYPAL_SANDBOX_LEDGER_ENABLED !== 'true') return;
+  const period = confirmedSandboxPeriod(subscription, transaction, binding.plan);
+  if (!period) return;
+  await database(env, 'paypal_sandbox_confirm_period', {
+    target_checkout: binding.id, target_profile: binding.merchant_profile || 'legacy',
+    target_payment: period.payment, period_start: period.from, period_end: period.until
+  });
+}
+export async function sandboxEntitlement(env, binding, subscription, api) {
+  if (env.PAYPAL_SANDBOX_LEDGER_ENABLED !== 'true') return null;
+  const stamp = Date.parse(subscription.billing_info?.last_payment?.time);
+  if (Number.isFinite(stamp) && stamp <= Date.now() && stamp >= Date.now() - 40 * 86400000) {
+    const query = new URLSearchParams({ start_time: new Date(stamp - 86400000).toISOString(), end_time: new Date().toISOString() });
+    const list = await api('/v1/billing/subscriptions/' + encodeURIComponent(binding.subscription_id) + '/transactions?' + query);
+    for (const item of list.transactions || []) {
+      if (['REFUNDED', 'PARTIALLY_REFUNDED', 'REVERSED'].includes(item.status) && /^[A-Za-z0-9-]{1,200}$/.test(item.id || '')) {
+        await database(env, 'paypal_sandbox_hold_payment', { target_profile: binding.merchant_profile || 'legacy', target_payment: item.id,
+          target_event: ('reconcile:' + item.id).slice(0, 200), target_reason: item.status === 'REVERSED' ? 'PAYMENT.SALE.REVERSED' : 'PAYMENT.SALE.REFUNDED' });
+      }
+    }
+    // A bounded reconciliation also recovers an already paid checkout after rollout.
+    if (!list.links?.some(link => link.rel === 'next') && !(Number(list.total_pages) > 1)) {
+      const matches = list.transactions?.filter(item => confirmedSandboxPeriod(subscription, item, binding.plan)) || [];
+      if (matches.length === 1) await storeSandboxPeriod(env, binding, subscription, matches[0]);
+    }
+  }
+  const result = await database(env, 'paypal_sandbox_entitlement', { target_checkout: binding.id, target_profile: binding.merchant_profile || 'legacy' });
+  if (!['ACTIVE', 'CANCELLED'].includes(subscription.status)) return { active: false, plan: 'free', paidUntil: result.paidUntil, reason: 'provider_not_active' };
+  return { active: result.active === true, plan: result.active === true ? binding.plan : 'free', paidUntil: result.paidUntil || null, reason: result.reason, renewalExpected: subscription.status === 'ACTIVE' };
+}
 export async function boundedJson(request, limit = 65536) {
   const reader = request.body?.getReader();
   if (!reader) fail(400, 'Corpo ausente.');

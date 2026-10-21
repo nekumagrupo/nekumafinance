@@ -5008,7 +5008,21 @@
     const labels = { not_started: "Nenhum checkout iniciado", not_configured: "Configuracao de testes pendente", PENDING_BINDING: "Checkout em preparacao", APPROVAL_PENDING: "Aguardando aprovacao no PayPal", APPROVED: "Assinatura aprovada; aguardando pagamento", ACTIVE: "Assinatura ativa no PayPal", SUSPENDED: "Assinatura suspensa", CANCELLED: "Assinatura cancelada", EXPIRED: "Assinatura encerrada" };
     const resume = snapshot?.status === "APPROVAL_PENDING" && ["pro", "family"].includes(snapshot.plan)
       ? `<button type="button" class="small-action" data-action="paypal-sandbox-checkout" data-plan="${snapshot.plan}">Retomar teste PayPal</button>` : "";
-    return `<section class="content-panel"><div class="panel-head"><div><h2>Pagamento</h2><p class="row-meta">Contratacao comercial ainda indisponivel.</p></div><button type="button" class="small-action" data-action="paypal-sandbox-status" ${paypalSandboxLoading ? "disabled" : ""}>${paypalSandboxLoading ? "Consultando..." : "Consultar teste PayPal"}</button></div><div role="status" aria-live="polite">${snapshot?.error ? `<p>${escapeHtml(snapshot.error)}</p>` : snapshot ? `<p>${escapeHtml(labels[snapshot.status] || "Aguardando confirmacao")}</p>` : ""}${snapshot?.available ? `<p>Sandbox: sem cobranca real e sem alteracao do plano do aplicativo.</p><p><span>Comprovantes de teste validados:</span> ${number(snapshot.confirmedReceipts || 0)}</p>${snapshot.lastConfirmedAt ? `<p class="row-meta"><span>Ultima confirmacao recebida:</span> ${escapeHtml(new Date(snapshot.lastConfirmedAt).toLocaleString())}</p>` : ""}${snapshot.status === "not_started" ? `<button type="button" class="small-action" data-action="paypal-sandbox-checkout" data-plan="pro">Testar PRO</button> <button type="button" class="small-action" data-action="paypal-sandbox-checkout" data-plan="family">Testar Familia</button>` : resume}` : ""}</div></section>`;
+    const simulation = snapshot?.simulation;
+    const simulatedPlan = simulation?.active === true && ["pro", "family"].includes(simulation.plan) ? (simulation.plan === "pro" ? "PRO" : "Familia") : "Gratis";
+    return `<section class="content-panel">
+      <div class="panel-head"><div><h2>Pagamento</h2><p class="row-meta">Contratacao comercial ainda indisponivel.</p></div>
+        <button type="button" class="small-action" data-action="paypal-sandbox-status" ${paypalSandboxLoading ? "disabled" : ""}>${paypalSandboxLoading ? "Consultando..." : "Consultar teste PayPal"}</button></div>
+      <div role="status" aria-live="polite">
+        ${snapshot?.error ? `<p>${escapeHtml(snapshot.error)}</p>` : snapshot ? `<p>${escapeHtml(labels[snapshot.status] || "Aguardando confirmacao")}</p>` : ""}
+        ${snapshot?.available ? `<p>Sandbox: sem cobranca real e sem alteracao do plano do aplicativo.</p>
+          <p><span>Comprovantes de teste validados:</span> ${number(snapshot.confirmedReceipts || 0)}</p>
+          ${snapshot.lastConfirmedAt ? `<p class="row-meta"><span>Ultima confirmacao recebida:</span> ${escapeHtml(new Date(snapshot.lastConfirmedAt).toLocaleString())}</p>` : ""}
+          ${simulation ? `<p><span>Plano simulado no Sandbox:</span> <strong>${simulatedPlan}</strong></p>
+            ${simulation.paidUntil ? `<p><span>Periodo pago de teste ate:</span> ${escapeHtml(new Date(simulation.paidUntil).toLocaleString())}</p>` : ""}
+            ${simulation.reason === "payment_review" ? `<p>Pagamento de teste em revisao.</p>` : ""}` : ""}
+          ${snapshot.status === "not_started" ? `<button type="button" class="small-action" data-action="paypal-sandbox-checkout" data-plan="pro">Testar PRO</button> <button type="button" class="small-action" data-action="paypal-sandbox-checkout" data-plan="family">Testar Familia</button>` : resume}` : ""}
+      </div></section>`;
   }
 
   async function loadCommercialAccess() {

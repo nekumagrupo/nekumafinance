@@ -417,6 +417,9 @@
   Object.assign(messages["en-US"], {
     "Pagamento": "Payment", "Contratacao comercial ainda indisponivel.": "Paid subscriptions are not available yet.",
     "Retomar teste PayPal": "Resume PayPal test",
+    "Plano simulado no Sandbox:": "Simulated Sandbox plan:",
+    "Periodo pago de teste ate:": "Test payment covers until:",
+    "Pagamento de teste em revisao.": "Test payment under review.",
     "Voce saiu. Alteracoes pendentes foram preservadas neste aparelho para esta conta.": "Signed out. Pending changes were kept on this device for this account.",
     "Nao foi possivel sair. Tente novamente.": "Could not sign out. Please try again.",
     "Consultar teste PayPal": "Check PayPal test", "Consultando...": "Checking...", "Nenhum checkout iniciado": "No checkout started",
@@ -432,6 +435,9 @@
   Object.assign(messages["ja-JP"], {
     "Pagamento": "お支払い", "Contratacao comercial ainda indisponivel.": "有料プランのお申し込みはまだご利用いただけません。",
     "Retomar teste PayPal": "PayPalテストを再開",
+    "Plano simulado no Sandbox:": "Sandboxのシミュレーションプラン：",
+    "Periodo pago de teste ate:": "テスト支払いの有効期限：",
+    "Pagamento de teste em revisao.": "テスト支払いは確認中です。",
     "Voce saiu. Alteracoes pendentes foram preservadas neste aparelho para esta conta.": "ログアウトしました。未同期の変更は、このアカウント用に端末に保存されています。",
     "Nao foi possivel sair. Tente novamente.": "ログアウトできませんでした。もう一度お試しください。",
     "Consultar teste PayPal": "PayPalテストを確認", "Consultando...": "確認中...", "Nenhum checkout iniciado": "お申し込みは開始されていません",
