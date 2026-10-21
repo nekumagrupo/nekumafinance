@@ -7489,6 +7489,10 @@ canvas {
 .mobile-menu-icon svg {
   width: 20px;
   height: 20px;
+  display: block;
+  flex-shrink: 0;
+  stroke: currentColor;
+  fill: none;
 }
 
 .mobile-menu-arrow {
@@ -7502,11 +7506,33 @@ canvas {
 }
 
 @media (max-width: 560px) {
-  .modal-mobileMenu {
+  .modal-backdrop.mobile-menu-backdrop {
+    padding: max(24px, env(safe-area-inset-top, 0px)) 12px max(16px, env(safe-area-inset-bottom, 0px));
+    place-items: end center;
+  }
+
+  .modal.modal-mobileMenu {
     align-self: end;
     width: 100%;
-    max-height: min(82dvh, 760px);
-    border-radius: 22px 22px 0 0;
+    max-width: 100%;
+    max-height: min(76vh, 680px);
+    max-height: min(76svh, 680px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-radius: 8px;
+  }
+
+  .modal-mobileMenu .mobile-menu-head {
+    flex: 0 0 auto;
+  }
+
+  .modal-mobileMenu .mobile-menu-groups {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
   }
 
   .mobile-menu-grid {

@@ -9100,14 +9100,16 @@
     const content = map[type] ? map[type](modalData) : "";
     modalRoot.innerHTML = `
       <div class="modal-backdrop">
-        <div class="modal modal-${escapeAttr(type)}" role="dialog" aria-modal="true" aria-label="Formulario">
+        <div class="modal modal-${escapeAttr(type)}" role="dialog" aria-modal="true" aria-label="${type === "mobileMenu" ? "Menu" : "Formulario"}">
           ${content}
         </div>
       </div>
     `;
+    if (type === "mobileMenu") modalRoot.firstElementChild.classList.add("mobile-menu-backdrop");
+    refreshIcons();
     i18n?.translate(modalRoot, activeLanguage());
     const first = modalRoot.querySelector("input, select, textarea, button");
-    if (first) first.focus();
+    if (first) first.focus({ preventScroll: true });
     updateTransferPreview();
     updateIncomeSourceDynamicFields();
     updateCommitmentCategoryField();
