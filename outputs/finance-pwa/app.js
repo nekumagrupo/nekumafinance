@@ -1100,24 +1100,48 @@
     }
   }
 
+  let remoteSignOutInProgress = false;
   async function signOutRemote() {
-    if (!remoteStore.enabled) return;
-    if (hasPendingLocalChanges()) await flushRemoteState();
-    await remoteStore.client.auth.signOut();
-    if (activeStorageKey) localStorage.removeItem(activeStorageKey);
-    activeStorageKey = "";
-    state = createInitialState();
-    remoteSession.status = "signedOut";
-    remoteSession.user = null;
-    remoteSession.householdId = "";
-    remoteSession.household = null;
-    remoteSession.householdMembers = [];
-    remoteSession.membersError = "";
-    remoteSession.error = "";
-    authView = "login";
+    if (!remoteStore.enabled || remoteSignOutInProgress) return;
+    remoteSignOutInProgress = true;
+    let pendingPreserved = false;
     stopRemoteAutoSync();
-    render();
-    showToast("Voce saiu da conta.");
+    clearTimeout(remoteSaveTimer);
+    remoteSaveTimer = null;
+    try {
+      if (hasPendingLocalChanges()) {
+        // Persist before attempting the network: a rejected sync must not trap login.
+        persistLocalState();
+        try { await flushRemoteState(); }
+        catch { pendingPreserved = true; }
+      }
+      const result = await remoteStore.client.auth.signOut({ scope: "local" });
+      if (result?.error) throw result.error;
+      if (activeStorageKey && !pendingPreserved) localStorage.removeItem(activeStorageKey);
+      stateGeneration += 1;
+      activeStorageKey = "";
+      state = createInitialState();
+      remoteSession.status = "signedOut";
+      remoteSession.user = null;
+      remoteSession.householdId = "";
+      remoteSession.household = null;
+      remoteSession.householdMembers = [];
+      remoteSession.commercialAccess = null;
+      remoteSession.lastSyncedAt = null;
+      remoteSession.saving = false;
+      remoteSession.membersError = "";
+      remoteSession.error = "";
+      paypalSandboxStatus = null;
+      lastLocalChangeAt = 0;
+      authView = "login";
+      render();
+      showToast(pendingPreserved ? "Voce saiu. Alteracoes pendentes foram preservadas neste aparelho para esta conta." : "Voce saiu da conta.");
+    } catch (error) {
+      remoteSession.error = error.message || "Nao foi possivel sair. Tente novamente.";
+      startRemoteAutoSync();
+      render();
+      showToast(remoteSession.error);
+    } finally { remoteSignOutInProgress = false; }
   }
 
   function socialAuthRedirectUrl() {
