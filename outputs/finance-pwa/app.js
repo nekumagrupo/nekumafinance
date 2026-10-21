@@ -10441,7 +10441,7 @@
         <div class="field card-payment-bank-field ${paymentMethod === "bank" ? "" : "is-hidden"}">
           <label for="cardBankAccountId">Conta para debito automatico</label>
           <select id="cardBankAccountId" name="bankAccountId">
-            ${bankAccountSelectOptions(activeCountry, item?.bankAccountId || "", "Selecione a conta")}
+            ${bankAccountSelectOptions("global", item?.bankAccountId || "", "Selecione a conta")}
           </select>
         </div>
         <div class="form-actions">
@@ -12562,7 +12562,7 @@
   function saveCreditCard(form) {
     const data = formData(form);
     const paymentMethod = normalizeCardPaymentMethod(data.paymentMethod);
-    if (paymentMethod === "bank" && !data.bankAccountId) {
+    if (paymentMethod === "bank" && (!data.bankAccountId || !bankAccountById(data.bankAccountId) || bankAccountById(data.bankAccountId).active === false)) {
       showToast("Selecione a conta do debito automatico.");
       return;
     }
