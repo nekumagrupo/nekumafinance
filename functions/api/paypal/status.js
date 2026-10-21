@@ -1,4 +1,4 @@
-import { reply, fail, configuration, customer, database, paypal, validateBinding, billingEnvironment, sandboxEntitlement } from '../../_shared/paypal-billing.js';
+import { reply, fail, configuration, customer, database, paypal, validateBinding, billingEnvironment, sandboxEntitlement, syncSandboxAccessState } from '../../_shared/paypal-billing.js';
 
 // POST keeps the same-origin/CSRF policy as checkout; the body never selects a user.
 export async function onRequestPost({ request, env }) {
@@ -18,6 +18,7 @@ export async function onRequestPost({ request, env }) {
       if (!['APPROVAL_PENDING', 'APPROVED', 'ACTIVE', 'SUSPENDED', 'CANCELLED', 'EXPIRED'].includes(subscription.status)) fail(502, 'Status desconhecido no provedor.');
       providerStatus = subscription.status;
       simulation = await sandboxEntitlement(env, snapshot, subscription, api);
+      await syncSandboxAccessState(env, snapshot, subscription);
     }
     return reply({ available: true, environment: 'sandbox', status: providerStatus, plan: snapshot.plan, simulation, confirmedReceipts: Number(snapshot.confirmed_receipts || 0), lastConfirmedAt: snapshot.last_confirmed_at || null, lastEventAt: snapshot.last_event_at || null });
   } catch (error) { return reply({ error: error.status ? error.message : 'Consulta de pagamento indisponivel.' }, error.status || 503); }

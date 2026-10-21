@@ -4997,7 +4997,10 @@
       if (!(response.headers.get("Content-Type") || "").includes("application/json")) throw new Error(`Pagamento temporariamente indisponivel (HTTP ${response.status}).`);
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Consulta indisponivel.");
-      if (remoteSession.user?.id === userId) paypalSandboxStatus = { ...data, userId };
+      if (remoteSession.user?.id === userId) {
+        paypalSandboxStatus = { ...data, userId };
+        await loadCommercialAccess();
+      }
     } catch (error) {
       if (remoteSession.user?.id === userId) paypalSandboxStatus = { userId, error: error.message || "Consulta indisponivel." };
     } finally { paypalSandboxLoading = false; render(); }
@@ -5015,7 +5018,7 @@
         <button type="button" class="small-action" data-action="paypal-sandbox-status" ${paypalSandboxLoading ? "disabled" : ""}>${paypalSandboxLoading ? "Consultando..." : "Consultar teste PayPal"}</button></div>
       <div role="status" aria-live="polite">
         ${snapshot?.error ? `<p>${escapeHtml(snapshot.error)}</p>` : snapshot ? `<p>${escapeHtml(labels[snapshot.status] || "Aguardando confirmacao")}</p>` : ""}
-        ${snapshot?.available ? `<p>Sandbox: sem cobranca real e sem alteracao do plano do aplicativo.</p>
+        ${snapshot?.available ? `<p>Sandbox: pagamentos ficticios. Recursos de teste apenas para contas autorizadas.</p>
           <p><span>Comprovantes de teste validados:</span> ${number(snapshot.confirmedReceipts || 0)}</p>
           ${snapshot.lastConfirmedAt ? `<p class="row-meta"><span>Ultima confirmacao recebida:</span> ${escapeHtml(new Date(snapshot.lastConfirmedAt).toLocaleString())}</p>` : ""}
           ${simulation ? `<p><span>Plano simulado no Sandbox:</span> <strong>${simulatedPlan}</strong></p>

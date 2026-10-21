@@ -3,11 +3,13 @@ pages_build_output_dir = "outputs/finance-pwa-online"
 compatibility_date = "2026-09-09"
 
 [vars]
+PAYPAL_SANDBOX_ACCESS_ENABLED = "true"
 PAYPAL_BILLING_MODE = "sandbox"
 PAYPAL_SANDBOX_PROFILE = "jp"
 PAYPAL_SANDBOX_LEDGER_ENABLED = "true"
 
 [env.production.vars]
+PAYPAL_SANDBOX_ACCESS_ENABLED = "true"
 PAYPAL_BILLING_MODE = "sandbox"
 PAYPAL_SANDBOX_PROFILE = "jp"
 PAYPAL_SANDBOX_LEDGER_ENABLED = "true"

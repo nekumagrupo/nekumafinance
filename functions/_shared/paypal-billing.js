@@ -87,6 +87,15 @@ export async function storeSandboxPeriod(env, binding, subscription, transaction
     target_payment: period.payment, period_start: period.from, period_end: period.until
   });
 }
+export async function syncSandboxAccessState(env, binding, subscription) {
+  if (env.PAYPAL_SANDBOX_ACCESS_ENABLED !== 'true') return;
+  const updated = Date.parse(subscription.update_time);
+  if (!Number.isFinite(updated)) fail(502, 'Data de atualizacao da assinatura ausente.');
+  await database(env, 'paypal_sandbox_sync_state', {
+    target_checkout: binding.id, target_profile: binding.merchant_profile || 'legacy',
+    target_status: subscription.status, target_updated_at: new Date(updated).toISOString()
+  });
+}
 export async function sandboxEntitlement(env, binding, subscription, api) {
   if (env.PAYPAL_SANDBOX_LEDGER_ENABLED !== 'true') return null;
   const stamp = Date.parse(subscription.billing_info?.last_payment?.time);

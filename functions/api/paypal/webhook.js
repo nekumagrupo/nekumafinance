@@ -1,4 +1,4 @@
-import { reply, fail, configuration, paypal, database, boundedJson, validateBinding, billingEnvironment, storeSandboxPeriod } from '../../_shared/paypal-billing.js';
+import { reply, fail, configuration, paypal, database, boundedJson, validateBinding, billingEnvironment, storeSandboxPeriod, syncSandboxAccessState } from '../../_shared/paypal-billing.js';
 
 export async function onRequestPost({ request, env }) {
   return handleWebhook({ request, env }, 'legacy');
@@ -51,6 +51,7 @@ export async function handleWebhook({ request, env }, profile) {
       await storeSandboxPeriod(env, binding, sub, confirmed);
     }
     await database(env, 'paypal_sandbox_record', { checkout_id: binding.id, event_key: event.id, event_kind: event.event_type, provider_status: sub.status, payment_id: payment });
+    await syncSandboxAccessState(env, binding, sub);
     return reply({ received: true, environment: 'sandbox' });
   } catch (error) { return reply({ error: error.status ? error.message : 'Webhook temporariamente indisponivel.' }, error.status || 503); }
 }

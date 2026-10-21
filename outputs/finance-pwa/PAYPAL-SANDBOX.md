@@ -125,6 +125,28 @@ Run `node scripts/verify-paypal-ui.cjs` for user-bound status and rendering chec
 
 ## Paid-period simulation (v9)
 
+- v10 applied on 2026-10-21: explicitly opted-in Sandbox testers can use the
+  paid-period ledger in `commercial_effective_plan`, so existing backend feature
+  enforcement sees PRO/Family or Free. Manual admin overrides retain priority.
+  Ordinary accounts and commercial subscription records remain unchanged.
+  `PAYPAL_SANDBOX_ACCESS_ENABLED=true` enables provider state synchronization;
+  publication enables synchronization after authorized migration/activation.
+  Audit confirmed six users preserved, exactly one enabled tester (the authorized
+  Nekuma ADMIN account), effective Free, and browser write/enable permissions denied.
+  Server/UI changes still require publication and integrated verification.
+  Provider update timestamps prevent older observations replacing newer state.
+  Refund holds remove access even if an ACTIVE event is replayed afterwards.
+  Dispute resolution/restoration and live billing are not implemented by v10.
+- Full Sandbox refund of payment `69W256254U351201P` completed on 2026-10-21
+  (refund `32J4575179071231S`, JPY 480). After an authenticated status refresh,
+  the app displayed simulated Free and payment review, removing paid validity.
+  The real commercial plan stayed Free. This demonstrates refund detection by
+  the integrated status flow, not independent proof of webhook delivery.
+- Integrated JP subscription `I-YLRYJLKW874T` was cancelled by the user in
+  Sandbox on 2026-10-21. The app displayed cancelled status, one validated
+  receipt and simulated PRO retained until 2026-11-21 19:00 Asia/Tokyo.
+  The actual commercial plan remained Free. This validates cancellation with
+  preserved paid validity, not a real renewal, refund or elapsed expiry.
 - v9 applied in Supabase on 2026-10-21. Audit confirmed six users preserved,
   authenticated table reads/RPC execution denied, service-role execution allowed.
 - Apply `supabase-paypal-ledger-v9.sql` before publishing with
