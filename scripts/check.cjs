@@ -4,6 +4,7 @@ const files = [
   "functions/_shared/paypal-billing.js",
   "functions/api/paypal/checkout.js",
   "functions/api/paypal/webhook.js",
+  "functions/api/paypal/jp-webhook.js",
   "functions/api/paypal/status.js",
   "functions/api/paypal/setup.js",
   "outputs/finance-pwa/app.js",

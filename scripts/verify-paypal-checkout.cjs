@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const encode = text => 'data:text/javascript;base64,' + Buffer.from(text).toString('base64');
 (async () => {
   const helper = encode(fs.readFileSync('functions/_shared/paypal-billing.js', 'utf8'));
+  const shared = await import(helper);
   const load = file => import(encode(fs.readFileSync(file, 'utf8').replace('../../_shared/paypal-billing.js', helper)));
   const checkout = await load('functions/api/paypal/checkout.js');
   const webhook = await load('functions/api/paypal/webhook.js');
@@ -13,6 +14,7 @@ const encode = text => 'data:text/javascript;base64,' + Buffer.from(text).toStri
   const request = (body, headers = {}) => new Request('https://app.nekumafinance.app/api/paypal/checkout', { method: 'POST', headers: { Origin: 'https://app.nekumafinance.app', Authorization: 'Bearer user-token', ...headers }, body: JSON.stringify(body) });
   const binding = { id: 'checkout-1', subscription_id: 'I-TEST', plan: 'pro', created_at: new Date().toISOString() };
   let bound = false, checkoutState = 'APPROVAL_PENDING', createdSubscriptions = 0;
+  let merchantFixture = 'legacy', lastOAuth = '', profileReads = 0;
   let invalidSignature = false, wrongAmount = false, records = 0, calls = 0, adminAllowed = false, databaseDenied = false, expiredSession = false;
   const original = global.fetch;
   global.fetch = async (url, options) => {
@@ -24,14 +26,16 @@ const encode = text => 'data:text/javascript;base64,' + Buffer.from(text).toStri
     if (url.endsWith('/commercial_admin_overview')) return adminAllowed ? json({ rows: [] }) : new Response('{}', { status: 403 });
     if (url.includes('/catalogs/products/')) return json({ id: 'NEKUMA-FINANCE-SANDBOX-V1', type: 'SERVICE' });
     if (url.includes('/billing/plans?')) return json({ plans: [{ id: 'P-PRO', name: 'Nekuma Finance PRO Sandbox v1' }, { id: 'P-FAMILY', name: 'Nekuma Finance Familia Sandbox v1' }] });
-    if (url.endsWith('/oauth2/token')) return json({ access_token: 'TOKEN' });
+    if (url.endsWith('/oauth2/token')) { lastOAuth = options.headers.Authorization; return json({ access_token: 'TOKEN' }); }
     if (url.includes('/billing/plans/')) return json({ id: url.endsWith('P-FAMILY') ? 'P-FAMILY' : 'P-PRO', product_id: 'NEKUMA-FINANCE-SANDBOX-V1', status: 'ACTIVE', billing_cycles: [{ tenure_type: 'REGULAR', frequency: { interval_unit: 'MONTH', interval_count: 1 }, total_cycles: 0, pricing_scheme: { fixed_price: { currency_code: 'JPY', value: url.endsWith('P-FAMILY') ? '850' : '480' } } }] });
     if (url.endsWith('/paypal_sandbox_reserve')) return json({ ...binding, subscription_id: bound ? binding.subscription_id : null });
+    if (url.endsWith('/paypal_sandbox_reserve_profile')) { assert.equal(JSON.parse(options.body).target_profile, 'jp'); profileReads++; return json({ ...binding, merchant_profile: 'jp' }); }
     if (url.endsWith('/paypal_sandbox_bind')) return json(true);
     if (url.endsWith('/billing/subscriptions')) { createdSubscriptions++; assert.equal(JSON.parse(options.body).custom_id, binding.id); return json({ id: 'I-TEST', status: 'APPROVAL_PENDING', links: [{ rel: 'approve', href: 'https://www.sandbox.paypal.com/approve' }] }); }
     if (url.endsWith('/verify-webhook-signature')) return json({ verification_status: invalidSignature ? 'FAILURE' : 'SUCCESS' });
-    if (url.endsWith('/paypal_sandbox_lookup')) return json(binding);
+    if (url.endsWith('/paypal_sandbox_lookup')) return json({ ...binding, merchant_profile: merchantFixture });
     if (url.endsWith('/paypal_sandbox_customer_status')) { assert.equal(JSON.parse(options.body).target_user, 'user-1'); return databaseDenied ? new Response('{}', { status: 401 }) : json({ ...binding, confirmed_receipts: records }); }
+    if (url.endsWith('/paypal_sandbox_customer_status_profile')) { assert.deepEqual(JSON.parse(options.body), { target_user: 'user-1', target_profile: 'jp' }); profileReads++; return json({ ...binding, merchant_profile: 'jp', confirmed_receipts: 0 }); }
     if (url.endsWith('/billing/subscriptions/I-TEST')) return json({ id: 'I-TEST', custom_id: binding.id, plan_id: 'P-PRO', status: checkoutState, links: [{ rel: 'approve', href: 'https://www.sandbox.paypal.com/approve' }] });
     if (url.includes('/transactions?')) return json({ transactions: [{ id: 'SALE-1', status: 'COMPLETED', amount_with_breakdown: { gross_amount: { currency_code: 'JPY', value: wrongAmount ? '1' : '480' } } }] });
     if (url.endsWith('/paypal_sandbox_record')) { records++; return json(true); }
@@ -79,6 +83,23 @@ const encode = text => 'data:text/javascript;base64,' + Buffer.from(text).toStri
     const prepared = await setup.onRequestPost({ env, request: adminRequest() });
     assert.equal(prepared.status, 200); assert.deepEqual((await prepared.json()).plans, { pro: 'P-PRO', family: 'P-FAMILY' });
     assert.equal((await setup.onRequestPost({ env: { ...env, PAYPAL_BILLING_MODE: 'live' }, request: adminRequest() })).status, 503);
+    const jpEnv = { ...env, PAYPAL_SANDBOX_PROFILE: 'jp', PAYPAL_JP_SANDBOX_CLIENT_ID: 'JP-ID', PAYPAL_JP_SANDBOX_CLIENT_SECRET: 'JP-SECRET', PAYPAL_JP_SANDBOX_WEBHOOK_ID: 'WH-JP', PAYPAL_JP_SANDBOX_PRO_PLAN_ID: 'P-PRO', PAYPAL_JP_SANDBOX_FAMILY_PLAN_ID: 'P-FAMILY' };
+    assert.throws(() => shared.billingEnvironment(env, 'attacker'), /Perfil/);
+    assert.equal(shared.billingEnvironment({ ...env, PAYPAL_SANDBOX_PROFILE: 'jp' }).PAYPAL_SANDBOX_CLIENT_SECRET, undefined, 'JP must not fall back to legacy credentials');
+    checkoutState = 'APPROVAL_PENDING';
+    const createsBeforeJP = createdSubscriptions;
+    assert.equal((await checkout.onRequestPost({ env: jpEnv, request: request({ plan: 'pro', target_profile: 'legacy' }) })).status, 200);
+    assert.equal(createdSubscriptions, createsBeforeJP);
+    assert.equal(lastOAuth, 'Basic ' + btoa('JP-ID:JP-SECRET'));
+    const jpSnapshot = await status.onRequestPost({ env: jpEnv, request: request({ target_profile: 'legacy' }) });
+    assert.equal((await jpSnapshot.json()).confirmedReceipts, 0);
+    assert.equal(profileReads, 2);
+    assert.equal((await webhook.onRequestPost({ env: jpEnv, request: request(event, headers) })).status, 200);
+    assert.equal(lastOAuth, 'Basic ' + btoa('test-id:SECRET'), 'Legacy URL retains legacy credentials after JP selection');
+    merchantFixture = 'jp';
+    assert.equal((await webhook.onRequestPost({ env: jpEnv, request: request(event, headers) })).status, 400, 'Legacy webhook cannot record a JP checkout');
+    assert.equal((await webhook.handleWebhook({ env: jpEnv, request: request(event, headers) }, 'jp')).status, 200);
+    assert.equal(lastOAuth, 'Basic ' + btoa('JP-ID:JP-SECRET'));
     console.log('PASS: Sandbox-only checkout, origin/test-user gates, server prices, signature verification and independent transaction confirmation. Mocked HTTP, not a real payment.');
   } finally { global.fetch = original; }
   const { PGlite } = require('../tmp/commercial-qa/node_modules/@electric-sql/pglite');
@@ -99,9 +120,21 @@ const encode = text => 'data:text/javascript;base64,' + Buffer.from(text).toStri
   const paymentStatus = (await db.query('select public.paypal_sandbox_customer_status($1) result', [uid])).rows[0].result;
   assert.equal(paymentStatus.confirmed_receipts, 1);
   assert.equal((await db.query('select public.paypal_sandbox_customer_status($1) result', ['22222222-2222-4222-8222-222222222222'])).rows[0].result, null);
+  const profilesSql = fs.readFileSync('outputs/finance-pwa/supabase-paypal-profiles-v8.sql', 'utf8');
+  await db.exec(profilesSql); await db.exec(profilesSql);
+  const jp = (await db.query('select public.paypal_sandbox_reserve_profile($1,$2,$3) result', [uid,'pro','jp'])).rows[0].result;
+  assert.notEqual(jp.id, a.id);
+  const jpRetry = (await db.query('select public.paypal_sandbox_reserve_profile($1,$2,$3) result', [uid,'family','jp'])).rows[0].result;
+  assert.equal(jpRetry.id, jp.id); assert.equal(jpRetry.plan, 'pro');
+  assert.equal((await db.query('select public.paypal_sandbox_customer_status($1) result',[uid])).rows[0].result.confirmed_receipts, 1);
+  assert.equal((await db.query('select public.paypal_sandbox_customer_status_profile($1,$2) result',[uid,'jp'])).rows[0].result.confirmed_receipts, 0);
+  await assert.rejects(db.query('select public.paypal_sandbox_reserve_profile($1,$2,$3)',[uid,'pro','attacker']), /INVALID/);
+  await assert.rejects(db.query('select public.paypal_sandbox_bind($1,$2)',[jp.id,'I-TEST']), /unique/);
   await db.exec("set request.jwt.claim.role='authenticated';");
   await assert.rejects(db.query('select public.paypal_sandbox_lookup($1)', ['I-TEST']), /FORBIDDEN/);
   await assert.rejects(db.query('select public.paypal_sandbox_customer_status($1)', [uid]), /FORBIDDEN/);
+  await assert.rejects(db.query('select public.paypal_sandbox_reserve_profile($1,$2,$3)',[uid,'pro','jp']), /FORBIDDEN/);
+  await assert.rejects(db.query('select public.paypal_sandbox_customer_status_profile($1,$2)',[uid,'jp']), /FORBIDDEN/);
   await db.close();
   console.log('PASS: repeatable SQL migration, one checkout per user, immutable binding, event idempotency and service-role guard. Disposable PostgreSQL only.');
 })().catch(error => { console.error(error); process.exitCode = 1; });

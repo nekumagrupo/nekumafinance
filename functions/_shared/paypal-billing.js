@@ -3,10 +3,20 @@ export function reply(data, status = 200) {
   return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
 }
 export function fail(status, message) { throw Object.assign(new Error(message), { status }); }
+export function billingEnvironment(env, profile = env.PAYPAL_SANDBOX_PROFILE || 'legacy') {
+  if (!['legacy', 'jp'].includes(profile)) fail(503, 'Perfil Sandbox invalido.');
+  const resolved = { ...env, PAYPAL_SANDBOX_PROFILE: profile };
+  if (profile === 'jp') {
+    for (const suffix of ['CLIENT_ID', 'CLIENT_SECRET', 'WEBHOOK_ID', 'PRO_PLAN_ID', 'FAMILY_PLAN_ID']) {
+      resolved['PAYPAL_SANDBOX_' + suffix] = env['PAYPAL_JP_SANDBOX_' + suffix];
+    }
+  }
+  return resolved;
+}
 export function configuration(env) {
   const names = ['PAYPAL_SANDBOX_CLIENT_ID', 'PAYPAL_SANDBOX_CLIENT_SECRET', 'PAYPAL_SANDBOX_WEBHOOK_ID', 'PAYPAL_SANDBOX_PRO_PLAN_ID', 'PAYPAL_SANDBOX_FAMILY_PLAN_ID', 'SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY'];
   if (env.PAYPAL_BILLING_MODE !== 'sandbox' || names.some(name => !env[name])) fail(503, 'Checkout de teste ainda nao configurado.');
-  return { pro: env.PAYPAL_SANDBOX_PRO_PLAN_ID, family: env.PAYPAL_SANDBOX_FAMILY_PLAN_ID };
+  return { pro: env.PAYPAL_SANDBOX_PRO_PLAN_ID, family: env.PAYPAL_SANDBOX_FAMILY_PLAN_ID, merchantProfile: env.PAYPAL_SANDBOX_PROFILE || 'legacy' };
 }
 export async function http(url, options = {}) {
   const response = await fetch(url, { ...options, redirect: 'manual', signal: AbortSignal.timeout(15000) });
@@ -14,6 +24,10 @@ export async function http(url, options = {}) {
   return response.json();
 }
 export async function database(env, name, args) {
+  if (env.PAYPAL_SANDBOX_PROFILE === 'jp' && ['paypal_sandbox_reserve', 'paypal_sandbox_customer_status'].includes(name)) {
+    name += '_profile';
+    args = { ...args, target_profile: 'jp' };
+  }
   return http(env.SUPABASE_URL.replace(/\/$/, '') + '/rest/v1/rpc/' + name, {
     method: 'POST', headers: { apikey: env.SUPABASE_SERVICE_ROLE_KEY, Authorization: 'Bearer ' + env.SUPABASE_SERVICE_ROLE_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify(args)
   }).catch(error => fail(424, 'Consulta de pagamentos indisponivel no banco' + (error.providerStatus ? ' (HTTP ' + error.providerStatus + ')' : '') + '.'));
@@ -44,6 +58,7 @@ export async function customer(request, env, { admin = false } = {}) {
   return user;
 }
 export function validateBinding(sub, binding, plans) {
+  if ((binding?.merchant_profile || 'legacy') !== (plans.merchantProfile || 'legacy')) fail(400, 'Conta vendedora divergente.');
   if (!['pro', 'family'].includes(binding?.plan) || sub.id !== binding.subscription_id || sub.custom_id !== binding.id || sub.plan_id !== plans[binding.plan] || sub.plan_overridden === true || (sub.quantity && Number(sub.quantity) !== 1) || Number(sub.shipping_amount?.value || 0) !== 0) fail(400, 'Vinculo divergente.');
 }
 export function validatePlan(plan, key) {

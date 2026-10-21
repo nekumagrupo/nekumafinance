@@ -1,7 +1,12 @@
-import { reply, fail, configuration, paypal, database, boundedJson, validateBinding } from '../../_shared/paypal-billing.js';
+import { reply, fail, configuration, paypal, database, boundedJson, validateBinding, billingEnvironment } from '../../_shared/paypal-billing.js';
 
 export async function onRequestPost({ request, env }) {
+  return handleWebhook({ request, env }, 'legacy');
+}
+
+export async function handleWebhook({ request, env }, profile) {
   try {
+    env = billingEnvironment(env, profile);
     const plans = configuration(env);
     const event = await boundedJson(request);
     if (!event.id || typeof event.id !== 'string' || event.id.length > 200) fail(400, 'Evento invalido.');
@@ -25,6 +30,7 @@ export async function onRequestPost({ request, env }) {
     if (!/^I-[A-Z0-9]+$/.test(id || '')) fail(400, 'Assinatura ausente.');
     const binding = await database(env, 'paypal_sandbox_lookup', { subscription: id });
     if (!binding) fail(503, 'Aguardando vinculo do checkout.');
+    if ((binding.merchant_profile || 'legacy') !== plans.merchantProfile) fail(400, 'Conta vendedora divergente.');
     const sub = await api('/v1/billing/subscriptions/' + encodeURIComponent(id));
     validateBinding(sub, binding, plans);
     let payment = null;

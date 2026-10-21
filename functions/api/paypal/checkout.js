@@ -1,7 +1,8 @@
-import { reply, fail, configuration, customer, paypal, database, validatePlan, validateBinding, boundedJson } from '../../_shared/paypal-billing.js';
+import { reply, fail, configuration, customer, paypal, database, validatePlan, validateBinding, boundedJson, billingEnvironment } from '../../_shared/paypal-billing.js';
 
 export async function onRequestPost({ request, env }) {
   try {
+    env = billingEnvironment(env);
     const plans = configuration(env);
     const user = await customer(request, env);
     const body = await boundedJson(request, 1024);

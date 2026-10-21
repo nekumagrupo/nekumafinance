@@ -1,8 +1,9 @@
-import { reply, fail, customer, paypal, validatePlan, boundedJson } from '../../_shared/paypal-billing.js';
+import { reply, fail, customer, paypal, validatePlan, boundedJson, billingEnvironment } from '../../_shared/paypal-billing.js';
 
 const PRODUCT = 'NEKUMA-FINANCE-SANDBOX-V1';
 export async function onRequestPost({ request, env }) {
   try {
+    env = billingEnvironment(env);
     await customer(request, env, { admin: true });
     const body = await boundedJson(request, 512);
     if (body.confirm !== 'CREATE_SANDBOX_CATALOG') fail(400, 'Confirme a preparacao do catalogo de testes.');
@@ -38,6 +39,6 @@ export async function onRequestPost({ request, env }) {
       validatePlan(plan, key);
       result[key] = plan.id;
     }
-    return reply({ environment: 'sandbox', plans: result });
+    return reply({ environment: 'sandbox', merchantProfile: env.PAYPAL_SANDBOX_PROFILE, plans: result });
   } catch (error) { return reply({ error: error.status ? error.message : 'Preparacao Sandbox indisponivel.' }, error.status || 503); }
 }

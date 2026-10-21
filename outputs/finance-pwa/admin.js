@@ -280,7 +280,8 @@
       const result=await response.json();if(!response.ok)throw new Error(result.error||'Nao foi possivel preparar os planos.');
       if(epoch!==sessionEpoch)return;
       if(result.environment!=='sandbox'||!/^P-[A-Z0-9]+$/.test(result.plans?.pro||'')||!/^P-[A-Z0-9]+$/.test(result.plans?.family||''))throw new Error('Resposta de configuracao invalida.');
-      $('paypal-setup-status').textContent='Planos de teste verificados. Configure no Cloudflare: PAYPAL_SANDBOX_PRO_PLAN_ID='+result.plans.pro+'; PAYPAL_SANDBOX_FAMILY_PLAN_ID='+result.plans.family+'. Reimplante antes de testar o checkout.';
+      const prefix=result.merchantProfile==='jp'?'PAYPAL_JP_SANDBOX_':'PAYPAL_SANDBOX_';
+      $('paypal-setup-status').textContent='Planos de teste verificados ('+(result.merchantProfile==='jp'?'Japao':'legado')+'). Configure no Cloudflare: '+prefix+'PRO_PLAN_ID='+result.plans.pro+'; '+prefix+'FAMILY_PLAN_ID='+result.plans.family+'. Reimplante antes de testar o checkout.';
     }catch(error){if(epoch===sessionEpoch)$('paypal-setup-status').textContent=error.message||'Preparacao indisponivel.';}finally{if(epoch===sessionEpoch)button.disabled=false;}
   });
   $('refresh').addEventListener('click',overview);

@@ -1,8 +1,9 @@
-import { reply, fail, configuration, customer, database, paypal, validateBinding } from '../../_shared/paypal-billing.js';
+import { reply, fail, configuration, customer, database, paypal, validateBinding, billingEnvironment } from '../../_shared/paypal-billing.js';
 
 // POST keeps the same-origin/CSRF policy as checkout; the body never selects a user.
 export async function onRequestPost({ request, env }) {
   try {
+    env = billingEnvironment(env);
     const user = await customer(request, env);
     let plans;
     try { plans = configuration(env); } catch { return reply({ available: false, environment: 'sandbox', status: 'not_configured' }); }

@@ -79,8 +79,46 @@ Run `node scripts/verify-paypal-ui.cjs` for user-bound status and rendering chec
 - Buyer approval loops back to PayPal login, including the user's external-browser
   test. Seller detail view also returned a generic PayPal error. These symptoms
   do not establish the root cause. The original request contains both return URLs.
-- Pending publication: resume bound checkouts using GET and the provider's approve
+- Published: resume bound checkouts using GET and the provider's approve
   link, without replaying subscription creation. Only APPROVAL_PENDING can resume;
   binding, plan validation, user allowlist and Sandbox-only gates remain enforced.
 - Mocked HTTP/SQL and UI regression tests pass; completed buyer approval and a
   verified PAYMENT.SALE.COMPLETED event remain unvalidated.
+
+## Japan merchant isolation (2026-10-21)
+
+- The user completed a standalone JP merchant/JP buyer Sandbox purchase for JPY
+  480. The supplied PayPal confirmation shows subscription I-YS65LM14JGJM under
+  diagnostic plan P-79L224394U314635UNLMJK5I. This was not started by the app and
+  does not prove an app webhook or entitlement update. Do not import it as a
+  customer-bound app checkout.
+- v8 adds a server-selected merchant profile to Sandbox checkout reservations.
+  Existing rows remain `legacy`; each user can also reserve one `jp` checkout.
+  The original RPC signatures continue selecting only legacy records.
+- Keep existing PAYPAL_SANDBOX_* settings unchanged. Add separate encrypted
+  PAYPAL_JP_SANDBOX_CLIENT_ID, PAYPAL_JP_SANDBOX_CLIENT_SECRET,
+  PAYPAL_JP_SANDBOX_WEBHOOK_ID, PAYPAL_JP_SANDBOX_PRO_PLAN_ID and
+  PAYPAL_JP_SANDBOX_FAMILY_PLAN_ID settings. JP never falls back to legacy keys.
+- Set PAYPAL_SANDBOX_PROFILE=jp only after approval, migration and publication.
+  The ADMIN setup action prepares/reuses the normal PRO/Family catalog in the
+  selected merchant; its returned setting names include the JP prefix. The
+  manually created diagnostic product remains separate.
+- Registered the JP app webhook at https://nekumafinance.app/api/paypal/jp-webhook
+  with eleven lifecycle/sale events. Its ID is 2AF5717100760710F.
+  The old /api/paypal/webhook route always uses legacy credentials, regardless
+  of the active customer profile. Both enforce signature and binding checks.
+- Required rollout order: approve/apply v8, publish code, configure separate JP
+  keys/webhook and select JP, prepare catalog as ADMIN/AAL2, save returned JP
+  plan IDs, redeploy, then initiate a new app-bound JP checkout. Never replace
+  old bindings, replay the diagnostic purchase, or enable live billing here.
+- v8 applied and audited in production: six users, one legacy checkout and one
+  legacy event preserved; browser execution denied and server execution allowed.
+- `wrangler.toml` selects the JP profile when the new code is published. JP keys
+  and plan IDs must be configured; missing values fail closed without fallback.
+- Local mock HTTP and disposable PostgreSQL tests cover merchant isolation,
+  repeat migrations, retries, preservation of legacy receipts, profile spoofing,
+  missing JP keys, cross-merchant webhook rejection and browser RPC denial.
+  The user saved the three separate JP client ID, client secret and webhook ID
+  settings in Cloudflare; encrypted entries were verified without opening values.
+  Credential validity, normal catalog configuration, publication and app-bound
+  payment remain pending.
