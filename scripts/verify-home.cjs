@@ -29,7 +29,7 @@ for (const [, asset] of html.matchAll(/(?:src|href)="\.\/([^"?]+)(?:\?[^" ]*)?"/
   assert.ok(fs.existsSync(`outputs/finance-pwa/${asset}`), `Missing asset: ${asset}`);
 }
 assert.match(html, /¥480/);
-assert.match(html, /3 dias de teste/);
+assert.match(html, /3 dias \(72 horas\) de PRO/);
 assert.equal((html.match(/<h1\b/g) || []).length, 1);
 assert.ok(fs.statSync('outputs/finance-pwa/assets/home-family-japan.webp').size < 200000);
 console.log(`PASS: ${keys.length} translated labels in EN/JA, demo click/keyboard, assets, pricing and compressed hero.`);

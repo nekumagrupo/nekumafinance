@@ -36,6 +36,7 @@
 .home-plan .button { width: 100%; min-height: 50px; gap: 9px; padding-inline: 12px; font-size: 12px; }
 .home-plan .home-plan-secondary { color: var(--green); background: #fff; border-color: #b5c8bc; }
 .home-plan .home-plan-secondary:hover { background: #edf4ef; }
+.home-plan button:disabled { cursor: not-allowed; color: #64756e; background: #f0f3f1; border-color: var(--line); transform: none; }
 .home-plan-status { min-height: 18px; margin: 10px 0 18px; font-size: 10px; text-align: center; color: var(--muted); line-height: 1.8; }
 .home-plan ul { list-style: none; display: grid; gap: 14px; border-top: 1px solid var(--line); margin: 0; padding: 22px 0 0; }
 .home-plan li { display: flex; align-items: start; gap: 9px; font-size: 12px; line-height: 1.7; }

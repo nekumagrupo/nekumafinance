@@ -32,7 +32,7 @@
     'pt-BR': {
       names:['Grátis','PRO','Família'],month:'/mês',badges:['O essencial','Mais planejamento','Até 5 pessoas'],more:'Saiba mais',less:'Mostrar menos',
       subtitles:['Para começar a organizar sua vida financeira.','Para entender o mês e planejar o que vem depois.','Tudo do PRO, com a família na mesma página.'],
-      ctas:['Criar conta grátis','Conhecer o PRO','Conhecer o Família'],soon:'Contratação em breve',freeNote:'Sem mensalidade',proNote:'3 dias de teste quando liberado',familyNote:'Um plano para até 5 pessoas no total',
+      ctas:['Criar conta grátis','Começar 3 dias de PRO','Em breve'],soon:'Em breve',freeNote:'Sem mensalidade',proNote:'3 dias de PRO ao criar sua conta',familyNote:'Um plano para até 5 pessoas no total',trialStatus:'Depois do teste, Grátis sem cobrança automática',
       highlights:[['1 conta bancária e 1 cartão','1 fábrica ou fonte de renda','Salário bruto previsto','Comparativo do mês e cripto manual','Calendários, moradia e veículo','Ordem fixa dos cards'],['Contas, cartões e empresas sem limite','Salário com descontos e líquido previsto','Metas, reserva e patrimônio','Orçamentos e projeção de saldo','30 scans de recibos por mês','Integrações cripto e cards personalizáveis'],['Todos os recursos do PRO','Titular + até 4 convidados','Raio-X e organização familiar','Moradia com responsáveis por conta','Negócios e controles da família','60 scans por mês, compartilhados']],
       title:'Compare cada recurso',resource:'Recurso',yes:'Incluído',no:'Não incluído',unlimited:'Sem limite',one:'1',gross:'Somente bruto',full:'Bruto, descontos e líquido',fixed:'Fixa',custom:'Personalizável',manual:'Manual',shared:'60 / mês compartilhados',thirty:'30 / mês',five:'Até 5 pessoas',self:'Individual',
       groups:['Sua rotina financeira','Planejamento e patrimônio','Cripto e produtividade','Vida em família'],
@@ -42,7 +42,7 @@
     'en-US': {
       names:['Free','PRO','Family'],month:'/month',badges:['The essentials','More planning','Up to 5 people'],more:'Learn more',less:'Show less',
       subtitles:['Start organizing your financial life.','Understand this month and plan what comes next.','Everything in PRO, with your family on the same page.'],
-      ctas:['Create a free account','Explore PRO','Explore Family'],soon:'Subscriptions coming soon',freeNote:'No monthly fee',proNote:'3-day trial when available',familyNote:'One plan for up to 5 people in total',
+      ctas:['Create a free account','Start 3 days of PRO','Coming soon'],soon:'Coming soon',freeNote:'No monthly fee',proNote:'3 days of PRO when you sign up',familyNote:'One plan for up to 5 people in total',trialStatus:'After the trial, Free with no automatic charge',
       highlights:[['1 bank account and 1 card','1 factory or income source','Expected gross salary','Monthly comparison and manual crypto','Calendars, housing and vehicle','Fixed dashboard card order'],['Unlimited accounts, cards and employers','Salary deductions and expected net pay','Goals, emergency fund and assets','Budgets and cash flow projections','30 receipt scans per month','Crypto integrations and customizable cards'],['Everything in PRO','Owner + up to 4 invited members','Family overview and organization','Assigned household bill payers','Family businesses and controls','60 shared scans per month']],
       title:'Compare every feature',resource:'Feature',yes:'Included',no:'Not included',unlimited:'Unlimited',one:'1',gross:'Gross only',full:'Gross, deductions and net',fixed:'Fixed',custom:'Customizable',manual:'Manual',shared:'60 / month shared',thirty:'30 / month',five:'Up to 5 people',self:'Individual',
       groups:['Everyday finances','Planning and assets','Crypto and productivity','Family life'],
@@ -52,7 +52,7 @@
     'ja-JP': {
       names:['無料','PRO','ファミリー'],month:'/月',badges:['基本の管理','もっと計画的に','最大5人'],more:'詳しく見る',less:'閉じる',
       subtitles:['毎日の家計管理を始めるために。','今月の内訳を把握し、これからの計画へ。','PROの全機能に、家族での共有を。'],
-      ctas:['無料アカウントを作成','PROを見る','ファミリーを見る'],soon:'有料プランは近日公開',freeNote:'月額料金なし',proNote:'公開時に3日間お試し',familyNote:'契約者を含む最大5人で利用',
+      ctas:['無料アカウントを作成','PROを3日間試す','近日公開'],soon:'近日公開',freeNote:'月額料金なし',proNote:'新規登録でPROを3日間利用',familyNote:'契約者を含む最大5人で利用',trialStatus:'終了後は無料プランへ。自動課金なし',
       highlights:[['銀行口座1件・カード1枚','工場または収入源1件','控除前の給与見込額','月別比較・手動の暗号資産管理','カレンダー・住居・車両管理','カードの並び順は固定'],['口座・カード・勤務先は無制限','控除と手取り見込額の内訳','目標・予備資金・資産管理','予算と残高シミュレーション','レシート読取は月30回','暗号資産連携・カードの並べ替え'],['PROのすべての機能','契約者＋招待メンバー最大4人','家族の家計の全体像','住居費の支払担当者を設定','家族の事業・管理機能','月60回の読取を家族で共有']],
       title:'機能を詳しく比較',resource:'機能',yes:'利用可能',no:'対象外',unlimited:'無制限',one:'1件',gross:'控除前のみ',full:'総支給・控除・手取り',fixed:'固定',custom:'並べ替え可能',manual:'手動',shared:'月60回を共有',thirty:'月30回',five:'最大5人',self:'個人',
       groups:['毎日の家計','計画と資産','暗号資産と便利な機能','家族の家計'],
@@ -60,6 +60,8 @@
       footnote:'¹ 貯蓄ボックスはNubank口座の登録が必要です。ファミリーの読取回数は家族全員で共有する上限です。料金は月額・日本円です。Nekumaは記録を整理するアプリで、送金や銀行の支払いは実行しません。'
     }
   };
+  translations['en-US'].pricingAvailability = 'New accounts automatically receive 3 days (72 hours) of PRO. Then continue on Free, with no automatic charge and no loss of records. Paid PRO subscriptions are being prepared. Family is coming soon.';
+  translations['ja-JP'].pricingAvailability = '新規登録でPROを自動的に3日間（72時間）利用できます。その後は無料プランに戻り、自動課金や記録の削除はありません。PROの有料契約は準備中です。ファミリープランは近日公開予定です。';
   // Rows follow the same plan rules as the app, including shared Family scan quotas.
   const pricingRows = [
     [0,'one','unlimited','unlimited'],[0,'one','unlimited','unlimited'],[0,'one','unlimited','unlimited'],[0,true,true,true],[0,false,true,true],
@@ -77,10 +79,10 @@
     const safe = text => String(text).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
     const link = href => safe(i18n?.publicUrl(href) || href);
     cards.innerHTML = ['free','pro','family'].map((plan,index) => `<article class="home-plan home-plan-${plan}" aria-labelledby="plan-${plan}-title">
-      <span class="home-plan-badge">${safe(copy.badges[index])}</span><h3 id="plan-${plan}-title">${safe(copy.names[index])}</h3><p class="home-plan-summary">${safe(copy.subtitles[index])}</p>
+      <span class="home-plan-badge">${safe(index===2?copy.soon:copy.badges[index])}</span><h3 id="plan-${plan}-title">${safe(copy.names[index])}</h3><p class="home-plan-summary">${safe(copy.subtitles[index])}</p>
       <p class="home-plan-price">¥${[0,480,850][index]}<span>${safe(copy.month)}</span></p><p class="home-plan-note">${safe([copy.freeNote,copy.proNote,copy.familyNote][index])}</p>
-      <a class="button ${index===1?'':'home-plan-secondary'}" href="${link(index===0?'./app.html?auth=signup':'./app.html?tab=plans')}">${safe(copy.ctas[index])}<i data-lucide="${index===0?'arrow-up-right':'arrow-right'}" aria-hidden="true"></i></a>
-      <p class="home-plan-status">${index===0?'&nbsp;':safe(copy.soon)}</p><ul>${copy.highlights[index].slice(0,3).map(text=>`<li><i data-lucide="check" aria-hidden="true"></i><span>${safe(text)}</span></li>`).join('')}</ul>
+      ${index===2 ? `<button class="button home-plan-secondary" type="button" disabled>${safe(copy.soon)}</button>` : `<a class="button ${index===1?'':'home-plan-secondary'}" href="${link('./app.html?auth=signup')}">${safe(copy.ctas[index])}<i data-lucide="arrow-up-right" aria-hidden="true"></i></a>`}
+      <p class="home-plan-status">${index===1?safe(copy.trialStatus):'&nbsp;'}</p><ul>${copy.highlights[index].slice(0,3).map(text=>`<li><i data-lucide="check" aria-hidden="true"></i><span>${safe(text)}</span></li>`).join('')}</ul>
     </article>`).join('');
     const value = item => typeof item==='boolean' ? `<span class="comparison-value ${item?'is-included':'is-excluded'}"><span class="comparison-symbol"><i data-lucide="${item?'check':'x'}" aria-hidden="true"></i></span><span>${safe(item?copy.yes:copy.no)}</span></span>` : `<span class="comparison-text">${safe(copy[item])}</span>`;
     let previousGroup = -1;
@@ -89,7 +91,7 @@
       previousGroup = group;
       return `${heading}<tr data-plan-feature="${index}"><th scope="row">${safe(copy.labels[index])}</th>${values.map(item=>`<td>${value(item)}</td>`).join('')}</tr>`;
     }).join('');
-    comparison.innerHTML = `<details class="plan-comparison-details" ${expanded?'open':''}><summary><span class="comparison-closed-label">${safe(copy.more)}</span><span class="comparison-open-label">${safe(copy.less)}</span><i data-lucide="chevron-down" aria-hidden="true"></i></summary><div class="comparison-expanded"><h3 class="comparison-title" id="comparison-title">${safe(copy.title)}</h3><div class="comparison-scroll" role="region" aria-labelledby="comparison-title" tabindex="0"><table class="plan-comparison-table"><caption class="sr-only">${safe(copy.title)}</caption><thead><tr><th scope="col">${safe(copy.resource)}</th>${copy.names.map((name,index)=>`<th scope="col"><span>${safe(name)}</span><small>¥${[0,480,850][index]}${safe(copy.month)}</small></th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div><p class="comparison-footnote">${safe(copy.footnote)}</p></div></details>`;
+    comparison.innerHTML = `<details class="plan-comparison-details" ${expanded?'open':''}><summary><span class="comparison-closed-label">${safe(copy.more)}</span><span class="comparison-open-label">${safe(copy.less)}</span><i data-lucide="chevron-down" aria-hidden="true"></i></summary><div class="comparison-expanded"><h3 class="comparison-title" id="comparison-title">${safe(copy.title)}</h3><div class="comparison-scroll" role="region" aria-labelledby="comparison-title" tabindex="0"><table class="plan-comparison-table"><caption class="sr-only">${safe(copy.title)}</caption><thead><tr><th scope="col">${safe(copy.resource)}</th>${copy.names.map((name,index)=>`<th scope="col"><span>${safe(name)}</span><small>¥${[0,480,850][index]}${safe(copy.month)}</small>${index===2?`<small>${safe(copy.soon)}</small>`:''}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div><p class="comparison-footnote">${safe(copy.footnote)}</p></div></details>`;
   }
   const originals = new Map([...document.querySelectorAll('[data-copy]')].map(element => [element, element.innerHTML]));
   const originalLinks = new Map([...document.querySelectorAll('a[href]')].map(element => [element, element.getAttribute('href')]));

@@ -25,11 +25,14 @@ const base = process.env.HOME_PREVIEW_URL || 'http://127.0.0.1:4182';
     assert.match(await page.locator('.home-plan-pro .home-plan-price').innerText(),/480/);
     assert.match(await page.locator('.home-plan-family .home-plan-price').innerText(),/850/);
     assert.match(await page.locator('.home-plan-free .button').getAttribute('href'),/auth=signup/);
-    for (const plan of ['pro','family']) assert.match(await page.locator(`.home-plan-${plan} .button`).getAttribute('href'),/tab=plans/);
+    assert.match(await page.locator('.home-plan-pro .button').getAttribute('href'),/auth=signup/);
+    assert.equal(await page.locator('.home-plan-family a').count(),0);
+    assert.equal(await page.locator('.home-plan-family button').isDisabled(),true);
+    assert.match(await page.locator('.pricing-availability').innerText(),/72/);
     const bounds=await page.evaluate(()=>{
       const grid=document.querySelector('.home-plan-grid');
       return {overflow:document.documentElement.scrollWidth>innerWidth,columns:getComputedStyle(grid).gridTemplateColumns.split(' ').length,
-       controls:[...grid.querySelectorAll('a')].every(el=>el.scrollWidth<=el.clientWidth+1),
+       controls:[...grid.querySelectorAll('a,button')].every(el=>el.scrollWidth<=el.clientWidth+1),
        icons:document.querySelectorAll('#planos i[data-lucide]').length};
     });
     assert.equal(bounds.overflow,false,`${width}/${locale}: page overflow`);
@@ -70,8 +73,8 @@ const base = process.env.HOME_PREVIEW_URL || 'http://127.0.0.1:4182';
   await scroll.evaluate(el=>{el.scrollLeft=el.scrollWidth;});
   const stickyAfter=await page.locator('[data-plan-feature="3"] th').boundingBox();
   assert.equal(Math.round(stickyBefore.x),Math.round(stickyAfter.x));
-  await page.getByRole('link',{name:'Conhecer o PRO',exact:true}).click();
-  assert.ok(page.url().includes('tab=plans'));
+  await page.getByRole('link',{name:'Começar 3 dias de PRO',exact:true}).click();
+  assert.ok(page.url().includes('auth=signup'));
   assert.deepEqual(errors,[]);
   console.log('PASS: concise 3-plan summaries, comparison collapsed by default, click/keyboard expand-collapse, language state retention, 27 rows, X/check markers, prices, CTA destinations and responsive bounds. Local Chromium; no real checkout.');
  } finally {await browser.close();}
