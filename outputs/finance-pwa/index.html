@@ -23,13 +23,13 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="./home.css?v=267" />
+  <link rel="stylesheet" href="./home.css?v=272" />
 </head>
 <body>
   <a class="skip-link" href="#conteudo" data-copy="skip">Ir para o conteúdo</a>
   <header class="site-header">
     <a class="brand" href="./index.html" aria-label="Nekuma Finance"><img src="./assets/nekuma-logo-192.png" width="42" height="42" alt="" /><span>Nekuma<span class="brand-finance">Finance</span></span></a>
-    <nav class="desktop-nav" aria-label="Principal"><a href="#experiencia" data-copy="navExperience">O aplicativo</a><a href="#recursos" data-copy="navFeatures">Por que Nekuma?</a><a href="#planos" data-copy="navPlans">Plano</a><a href="#perguntas" data-copy="navFaq">Dúvidas</a></nav>
+    <nav class="desktop-nav" aria-label="Principal"><a href="#experiencia" data-copy="navExperience">O aplicativo</a><a href="#recursos" data-copy="navFeatures">Por que Nekuma?</a><a href="#planos" data-copy="navPlans">Planos</a><a href="#perguntas" data-copy="navFaq">Dúvidas</a></nav>
     <div class="header-actions"><span id="home-language"></span><a class="login-link" href="./app.html?auth=login" data-copy="login">Entrar</a><a class="button button-small" href="./app.html?auth=signup"><span data-copy="start">Começar</span><i data-lucide="arrow-up-right" aria-hidden="true"></i></a></div>
   </header>
   <main id="conteudo">
@@ -64,13 +64,20 @@
 
     <section id="perguntas" class="faq-band"><div class="wrap section faq-layout"><div><p class="eyebrow" data-copy="faqEyebrow">ANTES DE COMEÇAR.</p><h2 data-copy="faqTitle">Sem dúvidas no caminho.</h2><a class="text-link" href="mailto:suporte@nekumafinance.app"><span data-copy="talkSupport">Falar com o suporte</span><i data-lucide="arrow-up-right" aria-hidden="true"></i></a></div><div class="faq-list"><details><summary data-copy="faqInstallQ">Preciso instalar o aplicativo?</summary><p data-copy="faqInstallA">Você pode acessar pelo navegador. No celular, também pode instalar o Nekuma na tela inicial para abrir como um aplicativo.</p></details><details><summary data-copy="faqBanksQ">O Nekuma movimenta meu dinheiro?</summary><p data-copy="faqBanksA">Não. O Nekuma ajuda a organizar e acompanhar suas informações financeiras. Registrar um pagamento no app não executa uma transferência bancária.</p></details><details><summary data-copy="faqLanguageQ">Posso usar em outro idioma?</summary><p data-copy="faqLanguageA">Sim. Você pode escolher português, inglês ou japonês e alterar o idioma nos ajustes do aplicativo.</p></details><details><summary data-copy="faqScanQ">O scan salva os gastos sozinho?</summary><p data-copy="faqScanA">Não. A IA sugere os dados do recibo. Você revisa e confirma antes de criar o lançamento.</p></details></div></div></section>
 
-    <section id="planos" class="section wrap pricing-layout"><div><p class="eyebrow" data-copy="pricingEyebrow">UM PRÓXIMO PASSO SIMPLES.</p><h2 data-copy="pricingTitle">Conheça por 3 dias.<br />Continue com o PRO.</h2><p class="pricing-description" data-copy="pricingDescription">Um espaço para organizar suas finanças no Japão e no Brasil, sem espalhar suas contas em várias ferramentas.</p></div><article class="pricing-plan"><div class="plan-heading"><h3>Nekuma Finance PRO</h3><span data-copy="trialBadge">3 dias de teste</span></div><p class="plan-price">¥480<span data-copy="perMonth">/mês</span></p><p class="plan-subtitle" data-copy="planSubtitle">Depois do período de teste</p><ul><li><i data-lucide="check" aria-hidden="true"></i><span data-copy="planAccounts">Contas em ienes e reais</span></li><li><i data-lucide="check" aria-hidden="true"></i><span data-copy="planSalary">Salário japonês e planejamento</span></li><li><i data-lucide="check" aria-hidden="true"></i><span data-copy="planReceipts">Scan de recibos com revisão</span></li><li><i data-lucide="check" aria-hidden="true"></i><span data-copy="planFamily">Organização financeira da família</span></li><li><i data-lucide="check" aria-hidden="true"></i><span data-copy="planGoals">Orçamentos, metas e patrimônio</span></li></ul><a class="button" href="./app.html?auth=signup"><span data-copy="trialCta">Começar meus 3 dias de teste</span><i data-lucide="arrow-up-right" aria-hidden="true"></i></a></article></section>
+    <section id="planos" class="section wrap pricing-comparison" aria-labelledby="pricing-title">
+      <div class="section-heading"><div><p class="eyebrow" data-copy="pricingEyebrow">UM PLANO PARA CADA MOMENTO.</p><h2 id="pricing-title" data-copy="pricingTitle">Seu dinheiro. Seu ritmo.<br />Seu plano.</h2></div><p data-copy="pricingDescription">Comece pelo essencial, amplie seu planejamento ou organize a vida financeira da família. Compare o que está incluído.</p></div>
+      <div id="home-plan-cards" class="home-plan-grid"></div>
+      <p class="pricing-availability" data-copy="pricingAvailability">Você já pode criar sua conta grátis. A contratação dos planos pagos e os 3 dias de teste do PRO serão liberados em breve.</p>
+      <div id="home-plan-comparison"></div>
+      <p class="pricing-preservation" data-copy="pricingPreservation">Mudou de plano? Seus registros continuam salvos. Recursos exclusivos ficam indisponíveis no Grátis, sem apagar seu histórico.</p>
+      <noscript><p>Grátis: ¥0. PRO: ¥480/mês. Família: ¥850/mês, até 5 pessoas no total. Planos pagos em breve. <a href="./app.html?auth=signup">Criar conta grátis</a>.</p></noscript>
+    </section>
     <section id="comecar" class="final-band"><div class="wrap final-inner"><p class="eyebrow" data-copy="finalEyebrow">O PRÓXIMO MÊS PODE SER DIFERENTE.</p><h2 data-copy="finalTitle">Trabalhar por seus planos começa com enxergar seu dinheiro.</h2><a class="button button-light" href="./app.html?auth=signup"><span data-copy="finalCta">Começar no Nekuma</span><i data-lucide="arrow-up-right" aria-hidden="true"></i></a><a class="final-login" href="./app.html?auth=login" data-copy="alreadyAccount">Já tenho uma conta</a></div></section>
   </main>
   <footer class="site-footer wrap"><div><a class="brand" href="./index.html"><img src="./assets/nekuma-logo-192.png" width="36" height="36" alt="" /><span>nekuma<span class="brand-finance">finance</span></span></a><p data-copy="footerTag">Uma vida entre países. Suas finanças no mesmo lugar.</p></div><nav aria-label="Informações legais"><a href="./privacy.html" data-copy="privacy">Privacidade</a><a href="./terms.html" data-copy="terms">Termos</a><a href="mailto:suporte@nekumafinance.app" data-copy="support">Suporte</a></nav><small>© 2026 Nekuma Finance</small></footer>
   <script src="./i18n.js?v=267"></script>
   <script src="./assets/vendor/lucide.min.js"></script>
-  <script src="./home.js?v=267" defer></script>
+  <script src="./home.js?v=272" defer></script>
   <dialog id="support-dialog" aria-labelledby="support-title">
     <button class="support-close" type="button" aria-label="Fechar / Close / 閉じる">×</button>
     <h2 id="support-title" data-copy="supportTitle">Fale com o Nekuma</h2>
