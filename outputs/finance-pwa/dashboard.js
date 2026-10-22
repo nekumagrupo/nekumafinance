@@ -106,7 +106,18 @@
     });
   }
 
-  function setup(root, layouts, save, month) {
+  const mobileOrder = ['overview-card', 'work-calendar-panel', 'subscriptions-panel', 'dashboard-cards-panel', 'housing-panel', 'vehicle-panel', 'family-panel', 'family-tools-panel', 'family-pie-panel', 'financial-calendar-panel', 'dashboard-trend-panel', 'crypto-panel', 'goals-panel', 'emergency-reserve-panel', 'nubank-boxes-home-panel', 'debt-home-panel', 'consortium-home-panel', 'budget-summary-panel', 'balance-projection-panel', 'recent-transactions-panel'];
+  const paidCards = ['goals-panel', 'emergency-reserve-panel', 'nubank-boxes-home-panel', 'debt-home-panel', 'consortium-home-panel', 'budget-summary-panel', 'balance-projection-panel'];
+  const familyCards = ['family-panel', 'family-tools-panel', 'family-pie-panel'];
+
+  function allowedCard(key, access) {
+    if (familyCards.includes(key)) return access.family === true;
+    return !paidCards.includes(key) || ['pro', 'family'].includes(access.plan);
+  }
+
+  function setup(root, layouts, save, month, access = { plan: 'free', family: false }) {
+    const customizable = ['pro', 'family'].includes(access.plan);
+    if (!customizable) layouts = {};
     const groups = [
       { id: 'work', title: 'Trabalho e Familia', cards: ['overview-card', 'paypal-panel', 'subscriptions-panel', 'dashboard-cards-panel', 'housing-panel', 'vehicle-panel', 'family-panel', 'budget-summary-panel', 'financial-calendar-panel', 'recent-transactions-panel'] },
       { id: 'investments', title: 'Investimentos', cards: ['goals-panel', 'nubank-boxes-home-panel', 'debt-home-panel', 'consortium-home-panel', 'emergency-reserve-panel', 'family-tools-panel', 'crypto-panel'] },
@@ -116,7 +127,9 @@
     sortables = [];
     const shell = root.querySelector('.desktop-dashboard-shell');
     if (!shell) return;
-    shell.classList.add('dashboard-organizable');
+    shell.classList.toggle('dashboard-organizable', customizable);
+    if (!customizable) shell.querySelectorAll('.workspace-reserve-card').forEach(card => card.remove());
+    if (!customizable) shell.querySelectorAll('[data-tab="wealth"]').forEach(button => button.remove());
     shell.querySelectorAll('.dashboard-card-vehicle-grid').forEach(wrapper => wrapper.replaceWith(...wrapper.children));
     const zones = [...shell.querySelectorAll('.desktop-dashboard-column')];
     const cards = new Map();
@@ -125,15 +138,18 @@
       [...zone.children].forEach(card => {
         const key = cardClasses.find(name => card.classList.contains(name));
         if (!key) return;
+        if (!allowedCard(key, access) || key === 'paypal-panel') { card.remove(); return; }
         card.dataset.dashboardCard = key;
         card.style.order = '0';
-        const handle = document.createElement('button');
-        handle.type = 'button';
-        handle.className = 'dashboard-handle';
-        handle.title = 'Mover card';
-        handle.setAttribute('aria-label', `Mover ${card.querySelector('h2')?.textContent || 'Resumo'}`);
-        handle.innerHTML = '<i data-lucide="menu" aria-hidden="true"></i>';
-        card.prepend(handle);
+        if (customizable) {
+          const handle = document.createElement('button');
+          handle.type = 'button';
+          handle.className = 'dashboard-handle';
+          handle.title = 'Mover card';
+          handle.setAttribute('aria-label', `Mover ${card.querySelector('h2')?.textContent || 'Resumo'}`);
+          handle.innerHTML = '<i data-lucide="menu" aria-hidden="true"></i>';
+          card.prepend(handle);
+        }
         cards.set(key, card);
       });
     });
@@ -144,7 +160,7 @@
       const zone = document.createElement('div');
       zone.className = 'dashboard-mobile-zone';
       shell.append(zone);
-      const order = [...(Array.isArray(layouts.mobile) ? layouts.mobile : []).map(migrateKey), ...groups.flatMap(group => group.cards), ...cardClasses];
+      const order = [...(Array.isArray(layouts.mobile) ? layouts.mobile : []).map(migrateKey), ...mobileOrder];
       new Set(order).forEach(key => { if (cards.has(key)) zone.append(cards.get(key)); });
       zones.forEach(column => column.remove());
       targets = [zone];
@@ -190,13 +206,14 @@
       });
       zones.forEach(column => column.remove());
       targets = lanes;
-      if (!saved.length) save({ ...layouts, groupedLanes: lanes.map(lane => [...lane.children].filter(card => card.dataset.dashboardCard).map(card => card.dataset.dashboardCard)) });
+      if (customizable && !saved.length) save({ ...layouts, groupedLanes: lanes.map(lane => [...lane.children].filter(card => card.dataset.dashboardCard).map(card => card.dataset.dashboardCard)) });
     }
     const remember = () => {
       const orders = targets.map(zone => [...zone.children].filter(card => card.dataset.dashboardCard).map(card => card.dataset.dashboardCard));
       save({ ...layouts, [mode]: mobile || mode === 'desktopFlow' ? orders[0] : orders });
     };
     targets.forEach(zone => {
+      if (!customizable) return;
       if (!window.Sortable) return;
       sortables.push(new window.Sortable(zone, {
         group: { name: mobile ? 'dashboard-mobile' : `dashboard-${zone.dataset.dashboardGroup}`, pull: false, put: false }, draggable: '[data-dashboard-card]', handle: '.dashboard-handle',

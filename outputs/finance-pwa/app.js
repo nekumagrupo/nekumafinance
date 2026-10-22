@@ -2917,7 +2917,7 @@
     window.NekumaDashboard?.setup(app, state.ui.dashboardLayouts || {}, layouts => {
       state.ui.dashboardLayouts = layouts;
       saveState();
-    }, state.ui.selectedMonth);
+    }, state.ui.selectedMonth, { plan: commercialSnapshot()?.plan || "free", family: hasFamilyAccess() });
     setupStableTabColumns();
     refreshIcons();
     if (hasCommercialFeature("binance")) window.NekumaBinance?.mount({ allowed: () => hasCommercialFeature("binance"), token: currentSupabaseAccessToken, money: formatMoney, convert, hidden: () => state.ui.hideCryptoDetails, icon: symbol => renderCryptoTokenIcon({ symbol, color: cryptoCatalog[symbol]?.color || '#71877e' }), icons: refreshIcons, onUpdate: () => { renderKeepingScroll(); refreshCryptoQuotes(true); } });
@@ -2943,6 +2943,8 @@
     const tab = state.ui.activeTab;
     const items = [
       { label: "Dashboard", icon: "layout-dashboard", tab: "dashboard" },
+      { label: "Familia", icon: "users", tab: "family" },
+      { label: "Indique e ganhe", icon: "share-2", tab: "referrals" },
       { label: "Banking", icon: "landmark", tab: "accounts" },
       { label: "Orcamentos", icon: "chart-pie", tab: "budgets" },
       { label: "Projecoes", icon: "chart-spline", tab: "projections" },
@@ -2958,7 +2960,7 @@
         <div class="desktop-prototype-brand"><img src="./assets/nekuma-logo-192.png" alt="" /><span>N</span></div>
         <div class="desktop-prototype-links">
           <button type="button" data-action="open-modal" data-modal="globalSearch" title="Pesquisa global"><i data-lucide="search" aria-hidden="true"></i><span>Pesquisar</span></button>
-          ${items.map((item) => `<button class="${item.tab === tab ? "is-active" : ""}" type="button" data-action="${item.tab ? "set-tab" : "prototype-feature"}" ${item.tab ? `data-tab="${item.tab}"` : `data-feature="${item.feature}"`} title="${item.label}"><i data-lucide="${item.icon}" aria-hidden="true"></i><span>${item.label}</span></button>`).join("")}
+          ${items.filter(item => commercialTabAllowed(item.tab)).map((item) => `<button class="${item.tab === tab ? "is-active" : ""}" type="button" data-action="${item.tab ? "set-tab" : "prototype-feature"}" ${item.tab ? `data-tab="${item.tab}"` : `data-feature="${item.feature}"`} title="${item.label}"><i data-lucide="${item.icon}" aria-hidden="true"></i><span>${item.label}</span></button>`).join("")}
         </div>
         <button class="desktop-prototype-profile" type="button" data-action="set-tab" data-tab="settings" aria-label="Abrir perfil"><img src="./assets/nekuma-logo-192.png" alt="" /></button>
       </nav>
@@ -3533,6 +3535,7 @@
 
   function renderCurrentTab() {
     const tab = state.ui.activeTab;
+    if (!commercialTabAllowed(tab)) return renderPlansPage();
     if (tab === "family") return hasFamilyAccess() ? renderFamilyPage() : renderPlansPage();
     if (tab === "referrals") return renderReferralPage();
     if (tab === "accounts") return renderAccounts();
@@ -4013,7 +4016,7 @@
     const hideBalance = Boolean(state.ui.hideBalance);
     const salaryCards = dashboardSalaryCards(state.ui.selectedMonth);
     const salaryTotal = salaryCards.reduce((total, card) => {
-      const net = card.kind === "factory" ? number(card.netAmount) : number(card.amount);
+      const net = card.kind === "factory" && hasCommercialFeature("salary_projection") ? number(card.netAmount) : number(card.amount);
       return total + convert(net, card.currency, primaryCurrency(), latestRate(state.ui.selectedMonth));
     }, 0);
     const quotes = state.fxQuotes || {};
@@ -4060,10 +4063,10 @@
             </nav>
             <div class="workspace-metrics">
               <article class="workspace-metric workspace-salary-metric" tabindex="0">
-                ${hasCommercialFeature("salary_projection") ? `<span>Salario previsto</span>
+                <span>Salario previsto</span>
                 <strong>${hideBalance ? "*****" : formatMoney(salaryTotal, primaryCurrency())}</strong>
                 <small>${salaryCards.length ? `${salaryCards.length} fonte${salaryCards.length === 1 ? "" : "s"} no mes` : "Cadastre uma fonte de renda"}</small>
-                ${renderWorkspaceSalaryPopover(salaryCards, hideBalance)}` : renderPlanLock("Projecao salarial")}
+                ${hasCommercialFeature("salary_projection") ? renderWorkspaceSalaryPopover(salaryCards, hideBalance) : `<small>Bruto previsto - Antes dos descontos</small>`}
               </article>
               <article class="workspace-metric"><span>Dolar / Real</span><strong>${quotes.usdBrl ? formatFxRate(quotes.usdBrl, 4) : "--"}</strong>${renderFxChangeChip(quotes.usdBrlChange)}</article>
               <article class="workspace-metric"><span>Dolar / Iene</span><strong>${usdJpy ? formatYenRate(usdJpy) : "--"}</strong>${renderFxChangeChip(quotes.usdJpyChange)}</article>
@@ -4339,8 +4342,7 @@
     const hideBalance = Boolean(state.ui.hideBalance);
     const salaryCards = dashboardSalaryCards(state.ui.selectedMonth);
     const accounts = activeBankAccounts();
-    const salaryAccountIds = new Set(salaryCards.map((card) => card.bankAccountId).filter(Boolean));
-    const additionalAccounts = accounts.filter((account) => !salaryAccountIds.has(account.id));
+    const additionalAccounts = accounts;
     return `
       <section class="dashboard-finance-strip" aria-label="Salário previsto e contas bancárias">
         <div class="dashboard-finance-strip-salaries">
@@ -4370,7 +4372,7 @@
         ${renderSalaryFormula(card, hideBalance)}
         <div class="dashboard-finance-foot"><span>${escapeHtml(card.title)}</span>${card.needsConfig
           ? `<button class="small-action" type="button" data-action="open-modal" data-modal="incomeSource" data-id="${escapeAttr(card.id)}">Configurar salário</button>`
-          : `<em>${escapeHtml(card.status)}</em>`}</div>
+          : hasCommercialFeature("salary_projection") ? `<em>${escapeHtml(card.status)}</em>` : ""}</div>
         ${!hideBalance && card.kind === "factory" ? renderSalaryPredictionDetails(card, { popover: true, id: popoverId }) : ""}
         ${!hideBalance && card.kind === "factory" ? renderSalaryPredictionDetails(card, { mobile: true }) : ""}
       </article>
@@ -4424,9 +4426,9 @@
               <small>${escapeHtml(card.title)}</small>
               ${card.needsConfig ? `
                 <button class="salary-confirm-button" type="button" data-action="open-modal" data-modal="incomeSource" data-id="${escapeAttr(card.id)}">Configurar salário</button>
-              ` : card.canConfirm ? `
+              ` : card.canConfirm && hasCommercialFeature("salary_projection") ? `
                 <button class="salary-confirm-button" type="button" data-action="open-modal" data-modal="salaryReceipt" data-payment-id="${escapeAttr(card.ref)}">Recebi</button>
-              ` : `<em>${escapeHtml(card.status)}</em>`}
+              ` : hasCommercialFeature("salary_projection") ? `<em>${escapeHtml(card.status)}</em>` : ""}
             </div>
           </article>
         `).join("")}
@@ -4435,6 +4437,9 @@
   }
 
   function renderSalaryFormula(card, hideBalance) {
+    if (!hasCommercialFeature("salary_projection")) {
+      return `<div class="salary-gross-summary"><span>Bruto previsto</span><strong>${hideBalance ? "*****" : formatMoneyWithPrimary(number(card.amount), card.currency, card.month)}</strong><small>Antes dos descontos</small></div>`;
+    }
     if (card.kind !== "factory") {
       return `<strong>${hideBalance ? "*****" : formatMoneyWithPrimary(card.amount, card.currency, card.month)}</strong>`;
     }
@@ -4465,6 +4470,7 @@
   }
 
   function renderSalaryPredictionDetails(card, options = {}) {
+    if (!hasCommercialFeature("salary_projection")) return "";
     if (card.kind !== "factory") return "";
     const breakdown = card.breakdown;
     const grossRows = breakdown ? [
@@ -5054,8 +5060,8 @@
     const access = remoteSession.commercialAccess?.userId === remoteSession.user?.id ? remoteSession.commercialAccess : null;
     const current = access?.plan;
     const descriptions = {
-      free: ["1 conta bancaria", "1 fabrica ou fonte de renda", "Comparativo mensal", "Cripto manual", "2 categorias de orcamento e 1 meta", "Exportacao dos seus dados"],
-      pro: ["Varias contas e empresas", "Projecao salarial e graficos individuais", "30 scans por mes", "Integracoes MetaMask e Binance", "Automacoes, cartoes e patrimonio"],
+      free: ["1 conta bancaria e 1 cartao", "1 fabrica ou fonte de renda", "Salario bruto previsto, antes dos descontos", "Comparativo mensal", "Cripto manual", "Organizacao fixa dos cards", "Exportacao dos seus dados"],
+      pro: ["Varias contas, cartoes e empresas", "Salario detalhado e projecao de saldo", "Organizacao personalizada dos cards", "30 scans por mes", "Integracoes MetaMask e Binance", "Automacoes e patrimonio"],
       family: ["Tudo do PRO", "Ate 5 membros", "60 scans mensais compartilhados", "Raio-X familiar", "Moradia com responsaveis por conta"]
     };
     const labels = { free: "Gratis", pro: "PRO", family: "Familia" };
@@ -5954,14 +5960,19 @@
   function preserveRestrictedRecordFormats(rawRemote, nextState) {
     if (!rawRemote) return nextState;
     const normalized = normalizeState(rawRemote);
-    const frozen = [];
-    if (!hasCommercialFeature("cards")) frozen.push("creditCards", "cardPurchases");
+    const frozen = ["creditCards", "cardPurchases"];
     if (!hasCommercialFeature("wealth")) frozen.push("investments", "debts", "nubankBoxes", "nubankBoxContributions");
+    if (!hasCommercialFeature("wealth")) frozen.push("financialGoals", "categoryBudgets");
     if (!hasCommercialFeature("automation")) frozen.push("categorizationRules");
     if (!hasCommercialFeature("projections")) frozen.push("projectionScenarios");
     if (!hasCommercialFeature("receipt_scan")) frozen.push("receipts");
     if (!hasFamilyAccess()) frozen.push("familyMembers", "familyBusinesses");
     const result = { ...nextState };
+    if (commercialSnapshot()?.plan === "free") {
+      result.ui = { ...nextState.ui };
+      if (Object.hasOwn(rawRemote.ui || {}, "dashboardLayouts")) result.ui.dashboardLayouts = rawRemote.ui.dashboardLayouts;
+      else delete result.ui.dashboardLayouts;
+    }
     for (const key of frozen) {
       const before = normalized[key] || [];
       if (JSON.stringify(nextState[key] || []) === JSON.stringify(before)) {
@@ -5985,10 +5996,19 @@
     return Boolean(access && !access.blocked && access.limits?.features?.includes(feature));
   }
 
+  function commercialTabAllowed(tab) {
+    if (tab === "family") return hasFamilyAccess();
+    if (["budgets", "projections", "wealth"].includes(tab)) return hasCommercialFeature(tab === "wealth" ? "wealth" : "projections");
+    return true;
+  }
+
   function commercialFeatureForType(type) {
     return ({ creditCard: "cards", "credit-card": "cards", cardPurchase: "cards", "card-purchase": "cards",
       investment: "wealth", debt: "wealth", consortium: "wealth", nubankBox: "wealth", "nubank-box": "wealth",
       nubankBoxContribution: "wealth", "nubank-box-contribution": "wealth", receipt: "receipt_scan", web3Wallet: "metamask",
+      salaryReceipt: "salary_projection", "salary-receipt": "salary_projection",
+      goal: "wealth", emergencyReserve: "wealth", "emergency-reserve": "wealth", goalContribution: "wealth", "goal-contribution": "wealth",
+      categoryBudget: "projections", "category-budget": "projections",
       categorizationRule: "automation", "categorization-rule": "automation", projectionScenario: "projections", "projection-scenario": "projections" })[type] || "";
   }
 
@@ -6004,15 +6024,20 @@
   function guardCommercialForm(type, data = {}) {
     const feature = commercialFeatureForType(type);
     if (feature && !hasCommercialFeature(feature)) { showPlanUpgrade(); return false; }
-    const resource = ({ bankAccount: "bankAccounts", "bank-account": "bankAccounts", incomeSource: "incomeSources", "income-source": "incomeSources", goal: "financialGoals", emergencyReserve: "financialGoals", "emergency-reserve": "financialGoals", categoryBudget: "categoryBudgets", "category-budget": "categoryBudgets" })[type];
+    if (["cardPurchase", "card-purchase"].includes(type) && commercialSnapshot()?.plan === "free") {
+      const cardId = data.cardId || findItem("cardPurchases", data.id)?.cardId;
+      if (cardId && cardId !== state.creditCards?.[0]?.id) { showPlanUpgrade("Cartao adicional"); return false; }
+    }
+    const resource = ({ creditCard: "creditCards", "credit-card": "creditCards", bankAccount: "bankAccounts", "bank-account": "bankAccounts", incomeSource: "incomeSources", "income-source": "incomeSources", goal: "financialGoals", emergencyReserve: "financialGoals", "emergency-reserve": "financialGoals", categoryBudget: "categoryBudgets", "category-budget": "categoryBudgets" })[type];
     if (!resource) return true;
     const access = commercialSnapshot();
     if (remoteStore.enabled && !access) { showToast("Nao foi possivel validar seu plano. Tente atualizar o app."); return false; }
     const rows = state[resource] || [];
     const active = row => resource !== "financialGoals" || row.active !== false;
     const existingId = data.id || (["emergencyReserve", "emergency-reserve"].includes(type) ? emergencyGoal()?.id : "");
+    if (resource === "creditCards" && access?.plan === "free" && existingId && existingId !== rows[0]?.id) { showPlanUpgrade("Cartao adicional"); return false; }
     if (existingId && rows.some(row => row.id === existingId && active(row) && (resource !== "categoryBudgets" || row.month === (data.month || state.ui.selectedMonth)))) return true;
-    const key = ({ bankAccounts: "accounts", incomeSources: "incomeSources", financialGoals: "activeGoals", categoryBudgets: "budgetCategories" })[resource];
+    const key = ({ creditCards: "creditCards", bankAccounts: "accounts", incomeSources: "incomeSources", financialGoals: "activeGoals", categoryBudgets: "budgetCategories" })[resource];
     const cap = access?.limits?.[key] ?? (access?.plan === "pro" || access?.plan === "family" ? null : resource === "categoryBudgets" ? 2 : 1);
     const count = rows.filter(row => active(row) && (resource !== "categoryBudgets" || row.month === (data.month || state.ui.selectedMonth))).length;
     if (cap !== null && count >= cap) { showPlanUpgrade(`Limite do plano: ${cap}`); return false; }
@@ -9042,6 +9067,8 @@
 
   function openModal(type, id = "") {
     const feature = commercialFeatureForType(type);
+    if (type === "salaryReceipt" && !hasCommercialFeature("salary_projection")) { showPlanUpgrade("Salario detalhado"); return; }
+    if (type === "creditCard" && !guardCommercialForm(type, { id })) return;
     const readOnly = Boolean(feature && !hasCommercialFeature(feature) && id);
     if (feature && !hasCommercialFeature(feature) && !id) { showPlanUpgrade(); return; }
     if (!feature && !guardCommercialForm(type, { id: String(id).startsWith("new:") ? "" : id })) return;
@@ -9343,7 +9370,7 @@
           <section class="mobile-menu-group">
             <h3>${escapeHtml(group.title)}</h3>
             <div class="mobile-menu-grid">
-              ${group.items.filter((item) => item.tab !== "family" || hasFamilyAccess()).map((item) => `
+              ${group.items.filter((item) => commercialTabAllowed(item.tab)).map((item) => `
                 <button class="mobile-menu-item ${item.tab === state.ui.activeTab ? "is-active" : ""}" type="button" data-action="set-tab" data-tab="${item.tab}">
                   <span class="mobile-menu-icon"><i data-lucide="${item.icon}" aria-hidden="true"></i></span>
                   <span><strong>${escapeHtml(item.label)}</strong><small>${escapeHtml(item.meta)}</small></span>
@@ -11082,7 +11109,7 @@
   function renderHousingCardModal(item = null) {
     const activeCountry = item?.country || "japao";
     const selectedCurrency = item?.currency || countryMeta[activeCountry]?.currency || primaryCurrency();
-    const services = normalizeHousingItems(item?.items, selectedCurrency);
+    const services = normalizeHousingItems(item?.items, selectedCurrency).map(service => item ? service : { ...service, startMonth: state.ui.selectedMonth });
     const cards = state.creditCards || [];
     const bankAccounts = activeBankAccounts();
     const companies = factorySources();
@@ -11188,6 +11215,7 @@
           </select>
         </div>
         <label class="housing-recurring-check"><input type="checkbox" name="${key}Recurring" ${service.recurring ? "checked" : ""} />Conta fixa mensal</label>
+        <div class="field"><label for="${key}StartMonth">Mes de inicio</label><input id="${key}StartMonth" name="${key}StartMonth" type="month" required value="${escapeAttr(service.startMonth || state.ui.selectedMonth)}" /></div>
         ${service.custom ? `<button class="small-action ghost housing-remove-other" type="button" data-action="remove-housing-other" aria-label="Remover item">Remover</button>` : ""}
       </div>
     `;
@@ -12891,7 +12919,7 @@
           companyId,
           payerId: String(data[`${key}PayerId`] || defaultPayerId).trim(),
           recurring: data[`${key}Recurring`] === "on",
-          startMonth: previousItems.get(key)?.startMonth || state.ui.selectedMonth
+          startMonth: /^\d{4}-(0[1-9]|1[0-2])$/.test(data[`${key}StartMonth`] || "") ? data[`${key}StartMonth`] : previousItems.get(key)?.startMonth || state.ui.selectedMonth
         };
       });
       const updated = upsertItem("housingCards", data.id, {
@@ -15997,7 +16025,7 @@
     return normalizeHousingItems(card.items, card.currency || primaryCurrency())
       .filter((item) => item.active !== false)
       .filter((item) => number(item.amount) > 0)
-      .filter((item) => item.recurring || item.startMonth === month)
+      .filter((item) => housingItemOccursInMonth(item, month))
       .map((item) => {
         const paid = isHousingItemPaid(card.id, item.key, month);
         const obligationPaid = item.paymentMethod === "card"
@@ -16016,6 +16044,10 @@
   function housingItemByKey(card, key) {
     return normalizeHousingItems(card?.items, card?.currency || primaryCurrency())
       .find((item) => item.key === key);
+  }
+
+  function housingItemOccursInMonth(item, month) {
+    return Boolean(item.startMonth && month >= item.startMonth && (item.recurring || item.startMonth === month));
   }
 
   function housingItemDateForMonth(item, month) {
@@ -17072,7 +17104,7 @@
     if (!source?.id || !paymentMonth) return [];
     const salaryCurrency = sanitizeCurrency(source.currency, "JPY");
     return (state.housingCards || []).flatMap((card) => normalizeHousingItems(card.items, card.currency || salaryCurrency)
-      .filter((item) => card.active !== false && item.active !== false && (item.recurring || item.startMonth === paymentMonth) && item.paymentMethod === "company" && item.companyId === source.id && number(item.amount) > 0)
+      .filter((item) => card.active !== false && item.active !== false && housingItemOccursInMonth(item, paymentMonth) && item.paymentMethod === "company" && item.companyId === source.id && number(item.amount) > 0)
       .map((item) => ({
         key: `housing:${card.id}:${item.key}`,
         label: `${item.label} - ${card.name || "Moradia"}`,
@@ -19446,7 +19478,7 @@
     if (needle.length < 2) { root.innerHTML = `<p class="empty-state">Digite pelo menos dois caracteres.</p>`; return; }
     const monthNames = ["janeiro","fevereiro","marco","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];
     const monthIndex = monthNames.findIndex((name) => needle.includes(name));
-    const results = searchableFinancialItems().filter((row) => {
+    const results = searchableFinancialItems().filter(row => commercialTabAllowed(row.tab)).filter((row) => {
       const haystack = normalizeLookupText(`${row.title} ${row.detail}`);
       if (haystack.includes(needle)) return true;
       if (monthIndex >= 0 && String(row.item.date || row.item.targetDate || "").slice(5, 7) === String(monthIndex + 1).padStart(2, "0")) return true;

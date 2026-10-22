@@ -11,8 +11,8 @@ const {chromium}=require(process.env.PLAYWRIGHT_PATH || 'playwright');
     await page.setContent('<main style="max-width:640px;margin:auto;padding:16px"><div id="fixture"></div></main>');
     await page.addStyleTag({content:fs.readFileSync('outputs/finance-pwa/styles.css','utf8')});
     await page.evaluate(src=>{
-      const render=new Function('escapeAttr','escapeHtml','number','selectedAttr','authorLabel','bankAccountName','familyPayerOptions','hasFamilyAccess','housingPaymentMethodMeta',src+';return renderHousingServiceFormRow;');
-      const row=render(String,String,Number,(a,b)=>a===b?'selected':'',()=>'',a=>a.nickname,()=>'<option>Responsavel principal da familia</option>',()=>true,{bank:'Conta bancaria',card:'Cartao',company:'Empresa'});
+      const render=new Function('escapeAttr','escapeHtml','number','selectedAttr','authorLabel','bankAccountName','familyPayerOptions','hasFamilyAccess','housingPaymentMethodMeta','state',src+';return renderHousingServiceFormRow;');
+      const row=render(String,String,Number,(a,b)=>a===b?'selected':'',()=>'',a=>a.nickname,()=>'<option>Responsavel principal da familia</option>',()=>true,{bank:'Conta bancaria',card:'Cartao',company:'Empresa'},{ui:{selectedMonth:'2026-10'}});
       document.querySelector('#fixture').innerHTML=row({key:'rent',label:'Aluguel',amount:80000,paymentMethod:'bank'},[],[{id:'bank',country:'japao',nickname:'Conta salario principal'}],[],'japao');
     },renderer);
     for (const width of [320,390,560,768,1280]) {

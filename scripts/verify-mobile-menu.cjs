@@ -22,6 +22,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
         ${renderMenu}
         const state={ui:{activeTab:'dashboard'}};
         const hasFamilyAccess=()=>true;
+        const commercialTabAllowed=()=>true;
         const escapeHtml=s=>s;
         document.querySelector('#modal-root').innerHTML='<div class="modal-backdrop mobile-menu-backdrop"><div class="modal modal-mobileMenu" role="dialog">'+renderMobileMenuModal()+'</div></div>';
         lucide.createIcons();
@@ -45,8 +46,8 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
     await page.setContent(`<link rel="stylesheet" href="${base}/styles.css"><div id="modal-root"></div>`);
     await page.addScriptTag({ url: base + '/assets/vendor/lucide.min.js' });
     await page.evaluate(source => {
-      const render = new Function('state','hasFamilyAccess','escapeHtml',source+'; return renderMobileMenuModal();');
-      const content=render({ui:{activeTab:'dashboard'}},()=>true,s=>s);
+      const render = new Function('state','hasFamilyAccess','escapeHtml','commercialTabAllowed',source+'; return renderMobileMenuModal();');
+      const content=render({ui:{activeTab:'dashboard'}},()=>true,s=>s,()=>true);
       document.querySelector('#modal-root').innerHTML='<div class="modal-backdrop mobile-menu-backdrop"><div class="modal modal-mobileMenu" role="dialog">'+content+'</div></div>';
       lucide.createIcons();
     }, renderMenu);
