@@ -14,6 +14,10 @@ function render(snapshot, userId = 'owner') {
 assert.ok(!render({ userId: 'other', available: true, status: 'not_started' }).includes('Testar PRO'));
 assert.ok(!render({ userId: 'owner', available: false, status: 'not_configured' }).includes('Testar PRO'));
 assert.ok(render({ userId: 'owner', available: true, status: 'not_started' }).includes('Testar PRO'));
+assert.ok(!render({ userId: 'owner', available: true, status: 'not_started' }).includes('Testar Familia'));
+assert.ok(render({userId:'owner',available:true,status:'CANCELLED',plan:'pro',canRestart:true,simulation:{active:false}}).includes('Iniciar novo teste PRO'));
+assert.ok(!render({userId:'owner',available:true,status:'CANCELLED',plan:'pro',canRestart:true,simulation:{active:true}}).includes('Iniciar novo teste PRO'));
+assert.ok(!render({userId:'owner',available:true,status:'APPROVAL_PENDING',plan:'family'}).includes('Retomar teste PayPal'));
 assert.ok(render({ userId: 'owner', available: true, status: 'APPROVAL_PENDING', plan: 'pro' }).includes('Retomar teste PayPal'));
 assert.ok(!render({ userId: 'other', available: true, status: 'APPROVAL_PENDING', plan: 'pro' }).includes('Retomar teste PayPal'));
 assert.ok(!render({ userId: 'owner', available: true, status: 'ACTIVE', plan: 'pro' }).includes('Retomar teste PayPal'));

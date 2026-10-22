@@ -1,4 +1,4 @@
-import { reply, fail, configuration, customer, database, paypal, validateBinding, billingEnvironment, sandboxEntitlement, syncSandboxAccessState } from '../../_shared/paypal-billing.js';
+import { reply, fail, configuration, customer, database, paypal, validateBinding, billingEnvironment, sandboxEntitlement, syncSandboxAccessState, canRestartSandboxCheckout } from '../../_shared/paypal-billing.js';
 
 // POST keeps the same-origin/CSRF policy as checkout; the body never selects a user.
 export async function onRequestPost({ request, env }) {
@@ -11,6 +11,7 @@ export async function onRequestPost({ request, env }) {
     if (!snapshot) return reply({ available: true, environment: 'sandbox', status: 'not_started', confirmedReceipts: 0 });
     let providerStatus = 'PENDING_BINDING';
     let simulation = null;
+    let canRestart = false;
     if (snapshot.subscription_id) {
       const api = await paypal(env);
       const subscription = await api('/v1/billing/subscriptions/' + encodeURIComponent(snapshot.subscription_id));
@@ -19,7 +20,8 @@ export async function onRequestPost({ request, env }) {
       providerStatus = subscription.status;
       simulation = await sandboxEntitlement(env, snapshot, subscription, api);
       await syncSandboxAccessState(env, snapshot, subscription);
+      canRestart = snapshot.plan === 'pro' && canRestartSandboxCheckout(env, subscription, simulation);
     }
-    return reply({ available: true, environment: 'sandbox', status: providerStatus, plan: snapshot.plan, simulation, confirmedReceipts: Number(snapshot.confirmed_receipts || 0), lastConfirmedAt: snapshot.last_confirmed_at || null, lastEventAt: snapshot.last_event_at || null });
+    return reply({ available: true, environment: 'sandbox', status: providerStatus, plan: snapshot.plan, simulation, canRestart, confirmedReceipts: Number(snapshot.confirmed_receipts || 0), lastConfirmedAt: snapshot.last_confirmed_at || null, lastEventAt: snapshot.last_event_at || null });
   } catch (error) { return reply({ error: error.status ? error.message : 'Consulta de pagamento indisponivel.' }, error.status || 503); }
 }

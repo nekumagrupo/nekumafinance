@@ -118,6 +118,15 @@ export async function sandboxEntitlement(env, binding, subscription, api) {
   if (!['ACTIVE', 'CANCELLED'].includes(subscription.status)) return { active: false, plan: 'free', paidUntil: result.paidUntil, reason: 'provider_not_active' };
   return { active: result.active === true, plan: result.active === true ? binding.plan : 'free', paidUntil: result.paidUntil || null, reason: result.reason, renewalExpected: subscription.status === 'ACTIVE' };
 }
+export function canRestartSandboxCheckout(env, subscription, simulation) {
+  if (env.PAYPAL_SANDBOX_LEDGER_ENABLED !== 'true' || env.PAYPAL_SANDBOX_ACCESS_ENABLED !== 'true'
+    || !['CANCELLED', 'EXPIRED'].includes(subscription.status) || simulation?.active !== false) return false;
+  if (simulation.reason === 'payment_review') return true;
+  const last = subscription.billing_info?.last_payment;
+  if (!last) return true;
+  const stamp = Date.parse(last.time);
+  return Number.isFinite(stamp) && stamp < Date.now() - 32 * 86400000;
+}
 export async function boundedJson(request, limit = 65536) {
   const reader = request.body?.getReader();
   if (!reader) fail(400, 'Corpo ausente.');

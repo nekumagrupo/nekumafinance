@@ -5015,7 +5015,7 @@
   function renderPaypalSandboxStatus() {
     const snapshot = paypalSandboxStatus?.userId === remoteSession.user?.id ? paypalSandboxStatus : null;
     const labels = { not_started: "Nenhum checkout iniciado", not_configured: "Configuracao de testes pendente", PENDING_BINDING: "Checkout em preparacao", APPROVAL_PENDING: "Aguardando aprovacao no PayPal", APPROVED: "Assinatura aprovada; aguardando pagamento", ACTIVE: "Assinatura ativa no PayPal", SUSPENDED: "Assinatura suspensa", CANCELLED: "Assinatura cancelada", EXPIRED: "Assinatura encerrada" };
-    const resume = snapshot?.status === "APPROVAL_PENDING" && ["pro", "family"].includes(snapshot.plan)
+    const resume = snapshot?.status === "APPROVAL_PENDING" && snapshot.plan === "pro"
       ? `<button type="button" class="small-action" data-action="paypal-sandbox-checkout" data-plan="${snapshot.plan}">Retomar teste PayPal</button>` : "";
     const simulation = snapshot?.simulation;
     const simulatedPlan = simulation?.active === true && ["pro", "family"].includes(simulation.plan) ? (simulation.plan === "pro" ? "PRO" : "Familia") : "Gratis";
@@ -5030,7 +5030,7 @@
           ${simulation ? `<p><span>Plano simulado no Sandbox:</span> <strong>${simulatedPlan}</strong></p>
             ${simulation.paidUntil ? `<p><span>Periodo pago de teste ate:</span> ${escapeHtml(new Date(simulation.paidUntil).toLocaleString())}</p>` : ""}
             ${simulation.reason === "payment_review" ? `<p>Pagamento de teste em revisao.</p>` : ""}` : ""}
-          ${snapshot.status === "not_started" ? `<button type="button" class="small-action" data-action="paypal-sandbox-checkout" data-plan="pro">Testar PRO</button> <button type="button" class="small-action" data-action="paypal-sandbox-checkout" data-plan="family">Testar Familia</button>` : resume}` : ""}
+          ${snapshot.status === "not_started" || (snapshot.canRestart === true && snapshot.plan === "pro" && ["CANCELLED", "EXPIRED"].includes(snapshot.status) && simulation?.active === false) ? `<button type="button" class="small-action" data-action="paypal-sandbox-checkout" data-plan="pro">${snapshot.canRestart ? "Iniciar novo teste PRO" : "Testar PRO"}</button>` : resume}` : ""}
       </div></section>`;
   }
 
