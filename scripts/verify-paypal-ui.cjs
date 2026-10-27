@@ -24,6 +24,11 @@ assert.ok(!render({ userId: 'owner', available: true, status: 'ACTIVE', plan: 'p
 assert.ok(!render({ userId: 'owner', available: true, status: 'APPROVAL_PENDING', plan: '<script>' }).includes('Retomar teste PayPal'));
 assert.ok(render({ userId: 'owner', available: true, status: 'APPROVED', confirmedReceipts: 0 }).includes('aguardando pagamento'));
 assert.ok(!render({ userId: 'owner', available: true, status: 'ACTIVE', confirmedReceipts: 0 }).includes('plano atualizado'));
+const reconciled = render({ userId: 'owner', available: true, status: 'ACTIVE', confirmedReceipts: 0, simulation: { active: true, plan: 'pro' } });
+assert.ok(reconciled.includes('Pagamentos confirmados por webhook:'));
+assert.ok(reconciled.includes('Periodo pago validado no servidor.'));
+assert.ok(!render({ userId: 'owner', available: true, status: 'ACTIVE', simulation: { active: false } }).includes('Periodo pago validado no servidor.'));
+assert.ok(!source.includes('sem cobranca real e sem alteracao do seu plano'));
 assert.ok(render({ userId: 'owner', available: true, status: 'ACTIVE', simulation: { active:true,plan:'pro',paidUntil:'2026-11-21T10:00:00Z' } }).includes('<strong>PRO</strong>'));
 assert.ok(!render({ userId: 'other', available: true, status: 'ACTIVE', simulation: { active:true,plan:'pro' } }).includes('Plano simulado'));
 assert.ok(render({ userId: 'owner', available: true, status: 'ACTIVE', simulation: { active:false,plan:'pro',reason:'payment_review' } }).includes('<strong>Gratis</strong>'));

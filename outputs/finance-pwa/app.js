@@ -4975,7 +4975,7 @@
 
   async function startPaypalSandboxCheckout(plan) {
     if (!["pro", "family"].includes(plan)) return;
-    const confirmation = "Teste PayPal Sandbox: sem cobranca real e sem alteracao do seu plano. Continuar?";
+    const confirmation = "Teste PayPal Sandbox: sem cobranca real. O pagamento de teste pode liberar ou remover recursos na conta autorizada. Continuar?";
     if (!window.confirm(i18n?.t(confirmation, activeLanguage()) || confirmation)) return;
     const button = document.querySelector(`[data-action="paypal-sandbox-checkout"][data-plan="${plan}"]`);
     if (button?.disabled) return;
@@ -5025,9 +5025,10 @@
       <div role="status" aria-live="polite">
         ${snapshot?.error ? `<p>${escapeHtml(snapshot.error)}</p>` : snapshot ? `<p>${escapeHtml(labels[snapshot.status] || "Aguardando confirmacao")}</p>` : ""}
         ${snapshot?.available ? `<p>Sandbox: pagamentos ficticios. Recursos de teste apenas para contas autorizadas.</p>
-          <p><span>Comprovantes de teste validados:</span> ${number(snapshot.confirmedReceipts || 0)}</p>
+          <p><span>Pagamentos confirmados por webhook:</span> ${number(snapshot.confirmedReceipts || 0)}</p>
           ${snapshot.lastConfirmedAt ? `<p class="row-meta"><span>Ultima confirmacao recebida:</span> ${escapeHtml(new Date(snapshot.lastConfirmedAt).toLocaleString())}</p>` : ""}
           ${simulation ? `<p><span>Plano simulado no Sandbox:</span> <strong>${simulatedPlan}</strong></p>
+            ${simulation.active === true ? `<p>Periodo pago validado no servidor. A consulta direta ao PayPal tambem pode confirmar o pagamento, antes do webhook.</p>` : ""}
             ${simulation.paidUntil ? `<p><span>Periodo pago de teste ate:</span> ${escapeHtml(new Date(simulation.paidUntil).toLocaleString())}</p>` : ""}
             ${simulation.reason === "payment_review" ? `<p>Pagamento de teste em revisao.</p>` : ""}` : ""}
           ${snapshot.status === "not_started" || (snapshot.canRestart === true && snapshot.plan === "pro" && ["CANCELLED", "EXPIRED"].includes(snapshot.status) && simulation?.active === false) ? `<button type="button" class="small-action" data-action="paypal-sandbox-checkout" data-plan="pro">${snapshot.canRestart ? "Iniciar novo teste PRO" : "Testar PRO"}</button>` : resume}` : ""}
