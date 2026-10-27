@@ -43,6 +43,8 @@ const fs = require('node:fs');
     if (name.includes('ledger')) await db.exec(sql);
   }
   const user='11111111-1111-4111-8111-111111111111';
+  const disputeMigration = fs.readFileSync('outputs/finance-pwa/supabase-paypal-disputes-v13.sql', 'utf8');
+  await db.exec(disputeMigration); await db.exec(disputeMigration);
   await db.exec(`insert into auth.users values('${user}'); set request.jwt.claim.role='service_role';`);
   const checkout=(await db.query('select public.paypal_sandbox_reserve_profile($1,$2,$3) result',[user,'pro','jp'])).rows[0].result;
   await db.query('select public.paypal_sandbox_bind($1,$2)',[checkout.id,'I-TEST']);
@@ -50,6 +52,8 @@ const fs = require('node:fs');
   assert.equal((await read()).active,false,'Approval alone never grants access');
   const confirm=()=>db.query('select public.paypal_sandbox_confirm_period($1,$2,$3,$4,$5)',[checkout.id,'jp','SALE-1',from,until]);
   await confirm(); await confirm();
+  await db.query('select public.paypal_sandbox_hold_payment($1,$2,$3,$4)', ['jp','DISPUTED-SALE','DISPUTE-1','CUSTOMER.DISPUTE.CREATED']);
+  await assert.rejects(db.query('select public.paypal_sandbox_hold_payment($1,$2,$3,$4)', ['jp','INVALID-SALE','DISPUTE-2','INVALID']), /check constraint/);
   assert.equal((await read()).active,true);
   assert.equal((await db.query('select count(*)::int n from public.paypal_sandbox_periods')).rows[0].n,1);
   await assert.rejects(db.query('select public.paypal_sandbox_confirm_period($1,$2,$3,$4,$5)',[checkout.id,'legacy','SALE-1',from,until]),/INVALID/);

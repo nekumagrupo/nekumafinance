@@ -16,6 +16,7 @@ const encode = text => 'data:text/javascript;base64,' + Buffer.from(text).toStri
   let bound = false, checkoutState = 'APPROVAL_PENDING', createdSubscriptions = 0;
   let merchantFixture = 'legacy', lastOAuth = '', profileReads = 0;
   let invalidSignature = false, wrongAmount = false, transactionMissing = false, records = 0, calls = 0, adminAllowed = false, databaseDenied = false, expiredSession = false;
+  const disputeHolds = [];
   const original = global.fetch;
   global.fetch = async (url, options) => {
     calls++; assert.equal(options.redirect, 'manual');
@@ -33,6 +34,9 @@ const encode = text => 'data:text/javascript;base64,' + Buffer.from(text).toStri
     if (url.endsWith('/paypal_sandbox_bind')) return json(true);
     if (url.endsWith('/billing/subscriptions')) { createdSubscriptions++; assert.equal(JSON.parse(options.body).custom_id, binding.id); return json({ id: 'I-TEST', status: 'APPROVAL_PENDING', links: [{ rel: 'approve', href: 'https://www.sandbox.paypal.com/approve' }] }); }
     if (url.endsWith('/verify-webhook-signature')) return json({ verification_status: invalidSignature ? 'FAILURE' : 'SUCCESS' });
+    if (url.endsWith('/customer/disputes/PP-D-TEST')) return json({ dispute_id: 'PP-D-TEST', disputed_transactions: [{ seller_transaction_id: 'SALE-1' }] });
+    if (url.endsWith('/paypal_sandbox_hold_payment')) { disputeHolds.push(JSON.parse(options.body)); return json(true); }
+    if (url.endsWith('/paypal_sandbox_review')) return json(true);
     if (url.endsWith('/paypal_sandbox_lookup')) return json({ ...binding, merchant_profile: merchantFixture });
     if (url.endsWith('/paypal_sandbox_customer_status')) { assert.equal(JSON.parse(options.body).target_user, 'user-1'); return databaseDenied ? new Response('{}', { status: 401 }) : json({ ...binding, confirmed_receipts: records }); }
     if (url.endsWith('/paypal_sandbox_customer_status_profile')) { assert.deepEqual(JSON.parse(options.body), { target_user: 'user-1', target_profile: 'jp' }); profileReads++; return json({ ...binding, merchant_profile: 'jp', confirmed_receipts: 0 }); }
@@ -65,6 +69,14 @@ const encode = text => 'data:text/javascript;base64,' + Buffer.from(text).toStri
     wrongAmount = false; transactionMissing = true;
     assert.equal((await deliver()).status, 503, 'Delayed provider transaction must remain retryable'); assert.equal(records, 0);
     transactionMissing = false; assert.equal((await deliver()).status, 200); assert.equal(records, 1);
+    const disputeEvent = { id: 'DISPUTE-1', event_type: 'CUSTOMER.DISPUTE.CREATED', resource: { dispute_id: 'PP-D-TEST', disputed_transactions: [{ seller_transaction_id: 'UNTRUSTED' }] } };
+    assert.equal((await webhook.onRequestPost({ env, request: request(disputeEvent, headers) })).status, 503);
+    assert.equal(disputeHolds.length, 0);
+    for (const kind of ['CREATED', 'UPDATED', 'RESOLVED']) {
+      assert.equal((await webhook.onRequestPost({ env: { ...env, PAYPAL_SANDBOX_DISPUTES_ENABLED: 'true' }, request: request({ ...disputeEvent, event_type: 'CUSTOMER.DISPUTE.' + kind }, headers) })).status, 200);
+    }
+    assert.equal(disputeHolds.length, 3);
+    assert.ok(disputeHolds.every(hold => hold.target_payment === 'SALE-1' && hold.target_profile === 'legacy' && hold.target_reason === 'CUSTOMER.DISPUTE.CREATED'));
     const pending = await status.onRequestPost({ env, request: request({ user_id: 'attacker' }) });
     assert.equal(pending.status, 200);
     const snapshot = await pending.json(); assert.equal(snapshot.status, 'ACTIVE'); assert.equal(snapshot.confirmedReceipts, 1);

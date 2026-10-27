@@ -19,6 +19,21 @@ export async function handleWebhook({ request, env }, profile) {
     if (cert.origin !== 'https://api.sandbox.paypal.com' || !cert.pathname.startsWith('/v1/notifications/certs/') || cert.username || cert.password) fail(400, 'Certificado invalido.');
     const api = await paypal(env);
     if ((await api('/v1/notifications/verify-webhook-signature', verification)).verification_status !== 'SUCCESS') fail(401, 'Assinatura invalida.');
+    if (['CUSTOMER.DISPUTE.CREATED', 'CUSTOMER.DISPUTE.UPDATED', 'CUSTOMER.DISPUTE.RESOLVED'].includes(event.event_type)) {
+      if (env.PAYPAL_SANDBOX_DISPUTES_ENABLED !== 'true') fail(503, 'Tratamento de disputas pendente de configuracao.');
+      const disputeId = event.resource?.dispute_id;
+      if (typeof disputeId !== 'string' || !/^[A-Za-z0-9-]{1,200}$/.test(disputeId)) fail(400, 'Disputa invalida.');
+      const dispute = await api('/v1/customer/disputes/' + encodeURIComponent(disputeId));
+      if (dispute.dispute_id !== disputeId) fail(502, 'Disputa divergente no provedor.');
+      const payments = [...new Set((dispute.disputed_transactions || []).map(item => item.seller_transaction_id))];
+      if (!payments.length || payments.some(id => typeof id !== 'string' || !/^[A-Za-z0-9-]{1,200}$/.test(id))) fail(503, 'Transacoes da disputa indisponiveis.');
+      // Disputes stay under review; a resolved event must never erase refund/reversal holds.
+      for (const payment of payments) await database(env, 'paypal_sandbox_hold_payment', {
+        target_profile: plans.merchantProfile, target_payment: payment, target_event: event.id, target_reason: 'CUSTOMER.DISPUTE.CREATED'
+      });
+      await database(env, 'paypal_sandbox_review', { event_key: event.id, event_kind: event.event_type });
+      return reply({ received: true, review: true, environment: 'sandbox' });
+    }
     const sale = event.event_type === 'PAYMENT.SALE.COMPLETED';
     const subscriptionEvent = String(event.event_type || '').startsWith('BILLING.SUBSCRIPTION.');
     if (!sale && !subscriptionEvent) {
