@@ -46,7 +46,9 @@ export async function handleWebhook({ request, env }, profile) {
       const transactions = await api('/v1/billing/subscriptions/' + encodeURIComponent(id) + '/transactions?' + query);
       const confirmed = transactions.transactions?.find(item => item.id === event.resource.id && item.status === 'COMPLETED');
       const amount = confirmed?.amount_with_breakdown?.gross_amount;
-      if (!confirmed || amount?.currency_code !== 'JPY' || Number(amount.value) !== (binding.plan === 'pro' ? 480 : 850)) fail(400, 'Pagamento nao confirmado.');
+      // The signed notification can arrive before the transaction query is consistent.
+      if (!confirmed) fail(503, 'Pagamento aguardando confirmacao no provedor.');
+      if (amount?.currency_code !== 'JPY' || Number(amount.value) !== (binding.plan === 'pro' ? 480 : 850)) fail(400, 'Valor do pagamento divergente.');
       payment = confirmed.id;
       await storeSandboxPeriod(env, binding, sub, confirmed);
     }

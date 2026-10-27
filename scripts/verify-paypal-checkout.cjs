@@ -15,7 +15,7 @@ const encode = text => 'data:text/javascript;base64,' + Buffer.from(text).toStri
   const binding = { id: 'checkout-1', subscription_id: 'I-TEST', plan: 'pro', created_at: new Date().toISOString() };
   let bound = false, checkoutState = 'APPROVAL_PENDING', createdSubscriptions = 0;
   let merchantFixture = 'legacy', lastOAuth = '', profileReads = 0;
-  let invalidSignature = false, wrongAmount = false, records = 0, calls = 0, adminAllowed = false, databaseDenied = false, expiredSession = false;
+  let invalidSignature = false, wrongAmount = false, transactionMissing = false, records = 0, calls = 0, adminAllowed = false, databaseDenied = false, expiredSession = false;
   const original = global.fetch;
   global.fetch = async (url, options) => {
     calls++; assert.equal(options.redirect, 'manual');
@@ -37,7 +37,7 @@ const encode = text => 'data:text/javascript;base64,' + Buffer.from(text).toStri
     if (url.endsWith('/paypal_sandbox_customer_status')) { assert.equal(JSON.parse(options.body).target_user, 'user-1'); return databaseDenied ? new Response('{}', { status: 401 }) : json({ ...binding, confirmed_receipts: records }); }
     if (url.endsWith('/paypal_sandbox_customer_status_profile')) { assert.deepEqual(JSON.parse(options.body), { target_user: 'user-1', target_profile: 'jp' }); profileReads++; return json({ ...binding, merchant_profile: 'jp', confirmed_receipts: 0 }); }
     if (url.endsWith('/billing/subscriptions/I-TEST')) return json({ id: 'I-TEST', custom_id: binding.id, plan_id: 'P-PRO', status: checkoutState, links: [{ rel: 'approve', href: 'https://www.sandbox.paypal.com/approve' }] });
-    if (url.includes('/transactions?')) return json({ transactions: [{ id: 'SALE-1', status: 'COMPLETED', amount_with_breakdown: { gross_amount: { currency_code: 'JPY', value: wrongAmount ? '1' : '480' } } }] });
+    if (url.includes('/transactions?')) return json({ transactions: transactionMissing ? [] : [{ id: 'SALE-1', status: 'COMPLETED', amount_with_breakdown: { gross_amount: { currency_code: 'JPY', value: wrongAmount ? '1' : '480' } } }] });
     if (url.endsWith('/paypal_sandbox_record')) { records++; return json(true); }
     throw new Error('Unexpected request ' + url);
   };
@@ -62,7 +62,9 @@ const encode = text => 'data:text/javascript;base64,' + Buffer.from(text).toStri
     const deliver = () => webhook.onRequestPost({ env, request: request(event, headers) });
     invalidSignature = true; assert.equal((await deliver()).status, 401); assert.equal(records, 0);
     invalidSignature = false; wrongAmount = true; assert.equal((await deliver()).status, 400); assert.equal(records, 0);
-    wrongAmount = false; assert.equal((await deliver()).status, 200); assert.equal(records, 1);
+    wrongAmount = false; transactionMissing = true;
+    assert.equal((await deliver()).status, 503, 'Delayed provider transaction must remain retryable'); assert.equal(records, 0);
+    transactionMissing = false; assert.equal((await deliver()).status, 200); assert.equal(records, 1);
     const pending = await status.onRequestPost({ env, request: request({ user_id: 'attacker' }) });
     assert.equal(pending.status, 200);
     const snapshot = await pending.json(); assert.equal(snapshot.status, 'ACTIVE'); assert.equal(snapshot.confirmedReceipts, 1);
