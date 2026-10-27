@@ -390,6 +390,8 @@
   let cdiRefreshTimer = null;
   const web3ListenerProviders = new WeakSet();
   let remotePullTimer = null;
+  let planAccessTimer = null;
+  let planAccessRefreshInFlight = false;
   let remotePullInFlight = false;
   let dashboardCarouselTimer = null;
   let dashboardMonthAnchored = "";
@@ -1667,11 +1669,31 @@
     stopRemoteAutoSync();
     if (!remoteStore.enabled) return;
     remotePullTimer = setInterval(() => requestRemotePull("timer"), 30000);
+    planAccessTimer = setInterval(() => refreshPlansAccess(), 5000);
   }
 
   function stopRemoteAutoSync() {
     if (remotePullTimer) clearInterval(remotePullTimer);
     remotePullTimer = null;
+    if (planAccessTimer) clearInterval(planAccessTimer);
+    planAccessTimer = null;
+  }
+
+  async function refreshPlansAccess() {
+    if (planAccessRefreshInFlight || document.hidden || resetInProgress || !remoteStore.enabled
+      || remoteSession.status !== "ready" || !remoteSession.user || state.ui.activeTab !== "plans") return;
+    const userId = remoteSession.user.id;
+    const generation = stateGeneration;
+    const before = JSON.stringify({ ...remoteSession.commercialAccess, checkedAt: 0 });
+    planAccessRefreshInFlight = true;
+    try {
+      // Read database entitlements only: this must not reconcile a PayPal payment.
+      await loadCommercialAccess();
+      if (remoteSession.user?.id !== userId || generation !== stateGeneration || state.ui.activeTab !== "plans") return;
+      const after = remoteSession.commercialAccess;
+      if (after && before !== JSON.stringify({ ...after, checkedAt: 0 })) renderKeepingScroll();
+    } catch { /* Retry on the next visible plans refresh. */ }
+    finally { planAccessRefreshInFlight = false; }
   }
 
   function requestRemotePull(reason = "auto") {
