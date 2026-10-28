@@ -438,6 +438,8 @@
   let remoteSaveTimer = null;
   let paypalSandboxStatus = null;
   let paypalSandboxLoading = false;
+  let stripeTestSnapshot = null;
+  let stripeTestBusy = false;
   let remoteSaveQueue = Promise.resolve();
   let resetInProgress = false;
   let stateGeneration = 0;
@@ -501,6 +503,8 @@
     if (action === "view-plans") { closeModal(); state.ui.activeTab = "plans"; render(); return; }
     if (action === "paypal-sandbox-checkout") { startPaypalSandboxCheckout(event.target.closest("[data-plan]")?.dataset.plan); return; }
     if (action === "paypal-sandbox-status") { loadPaypalSandboxStatus(); return; }
+    if (action === "stripe-test-status") { stripeTestRequest(false); return; }
+    if (action === "stripe-test-checkout") { stripeTestRequest(true); return; }
     if (action === "set-auth-view") {
       authView = button.dataset.view || "welcome";
       if (authView === "reset" && !isPasswordRecoveryLink) passwordRecoveryStep = "request";
@@ -4995,6 +4999,46 @@
     return renderVerifiedPlansPage();
   }
 
+  async function stripeTestRequest(checkout) {
+    if (stripeTestBusy || !remoteSession.user?.id) return;
+    if (checkout && !window.confirm("Stripe TESTE: assinatura ficticia de JPY 480/mes. Nao use cartao real. Este teste ainda nao altera seu plano. Continuar?")) return;
+    const userId = remoteSession.user.id;
+    stripeTestBusy = true;
+    render();
+    try {
+      const token = await currentSupabaseAccessToken();
+      const response = await fetch(checkout ? "/api/stripe/checkout" : "/api/stripe/status", {
+        method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(checkout ? { plan: "pro" } : {})
+      });
+      if (!(response.headers.get("Content-Type") || "").includes("application/json")) throw new Error("Stripe de teste ainda nao publicado.");
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Stripe indisponivel.");
+      if (remoteSession.user?.id !== userId) return;
+      if (data.environment !== "test" || data.grantsAccess !== false) throw new Error("Ambiente de teste divergente.");
+      if (checkout) {
+        const url = new URL(data.approvalUrl);
+        if (url.origin !== "https://checkout.stripe.com" || url.username || url.password) throw new Error("Destino invalido.");
+        window.location.assign(url.href);
+      } else stripeTestSnapshot = { ...data, userId };
+    } catch (error) {
+      if (remoteSession.user?.id === userId) stripeTestSnapshot = { userId, error: error.message || "Stripe indisponivel." };
+    } finally { stripeTestBusy = false; render(); }
+  }
+
+  function renderStripeTestPanel() {
+    // Visibility is a convenience only; the server independently checks the allowlist.
+    if (remoteSession.user?.id !== "569ccf01-6360-479e-8117-28dcdfba2335") return "";
+    const snapshot = stripeTestSnapshot?.userId === remoteSession.user.id ? stripeTestSnapshot : null;
+    const labels = { not_started: "Nenhum checkout iniciado", open: "Checkout aberto", complete: "Checkout concluido", expired: "Checkout expirado" };
+    return `<section class="content-panel"><div class="panel-head"><h2>Stripe - Teste</h2>
+      <button type="button" class="small-action" data-action="stripe-test-status" ${stripeTestBusy ? "disabled" : ""}>Consultar teste Stripe</button></div>
+      <p class="row-meta">JPY 480/mes. Pagamento ficticio; ainda nao altera o plano do aplicativo.</p>
+      <div role="status" aria-live="polite">${snapshot?.error ? `<p>${escapeHtml(snapshot.error)}</p>` : snapshot ? `<p>${escapeHtml(labels[snapshot.status] || "Aguardando confirmacao")}${snapshot.paymentStatus === "paid" ? " - pagamento de teste confirmado" : ""}</p>` : ""}</div>
+      ${snapshot && !snapshot.error && ["not_started", "open"].includes(snapshot.status) ? `<button type="button" class="small-action" data-action="stripe-test-checkout" ${stripeTestBusy ? "disabled" : ""}>${snapshot.status === "open" ? "Retomar teste Stripe" : "Testar PRO com Stripe"}</button>` : ""}
+    </section>`;
+  }
+
   async function startPaypalSandboxCheckout(plan) {
     if (!["pro", "family"].includes(plan)) return;
     const confirmation = "Teste PayPal Sandbox: sem cobranca real. O pagamento de teste pode liberar ou remover recursos na conta autorizada. Continuar?";
@@ -5091,6 +5135,7 @@
     return `<div class="detail-page-shell commercial-page">
       ${renderPageIntro("Planos Nekuma", "Seu plano e seus recursos", "Dados preservados em qualquer plano. Contratacao comercial ainda indisponivel.")}
       ${renderPaypalSandboxStatus()}
+      ${renderStripeTestPanel()}
       <section class="content-panel"><h2>${access ? `Plano ${labels[current]}` : "Plano aguardando validacao"}</h2>
         <p class="row-meta">${access ? "Informacao consultada no servidor." : "A base comercial precisa estar disponivel no Supabase para confirmar seu acesso."}</p>
         ${access?.status === "trialing" && access.trialEndsAt ? `<p>Teste ate ${escapeHtml(new Date(access.trialEndsAt).toLocaleString())}</p>` : ""}
