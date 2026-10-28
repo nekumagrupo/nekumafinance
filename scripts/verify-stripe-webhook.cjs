@@ -34,7 +34,7 @@ const encode = value => 'data:text/javascript;base64,' + Buffer.from(value).toSt
    lines:{has_more:false,data:[{quantity:1,proration:false,period:{start:now,end:now+30*86400},price:{currency:'jpy',unit_amount:480,recurring:{interval:'month',interval_count:1}}}]}});
   if(url.endsWith('/charges/ch_fixture')) return json({livemode:false,id:'ch_fixture',invoice:'in_fixture',customer:'cus_fixture',status:'succeeded',paid:true,
    amount:480,currency:'jpy',amount_refunded:refunded?480:0,refunded,disputed});
-  if(url.endsWith('/disputes/dp_fixture')) return json({livemode:false,id:'dp_fixture',charge:'ch_fixture'});
+  if(/\/disputes\/(?:dp|du)_fixture$/.test(url)) return json({livemode:false,id:url.split('/').at(-1),charge:'ch_fixture'});
   throw new Error('Unexpected '+url);
  };
  try {
@@ -46,7 +46,7 @@ const encode = value => 'data:text/javascript;base64,' + Buffer.from(value).toSt
   refunded=false; disputed=true; await helper.processStripeTestEvent(env,event); assert.equal(writes.at(-1).effect.reason,'dispute'); disputed=false;
   mismatch=true; const before=writes.length; await assert.rejects(helper.processStripeTestEvent(env,event),/divergente/); assert.equal(writes.length,before); mismatch=false;
   event.type='customer.subscription.deleted'; event.data.object.id='sub_fixture'; await helper.processStripeTestEvent(env,event); assert.equal(writes.at(-1).effect.action,'state');
-  event.type='charge.dispute.closed'; event.data.object.id='dp_fixture'; await helper.processStripeTestEvent(env,event); assert.equal(writes.at(-1).effect.action,'hold');
+  event.type='charge.dispute.closed'; event.data.object.id='du_fixture'; await helper.processStripeTestEvent(env,event); assert.equal(writes.at(-1).effect.action,'hold');
   assert.equal(writes.at(-1).effect.reason,'dispute');
   for (const type of ['charge.dispute.created','charge.dispute.updated']) {
    event.type=type; await helper.processStripeTestEvent(env,event);

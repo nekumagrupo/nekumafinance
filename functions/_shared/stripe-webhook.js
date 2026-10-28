@@ -7,7 +7,8 @@ const supported = new Set(['checkout.session.completed','invoice.paid','invoice.
   'charge.dispute.created','charge.dispute.updated','charge.dispute.closed']);
 const id = (value, prefix) => {
   const result = typeof value === 'string' ? value : value?.id;
-  const pattern = prefix === 'cs' ? /^cs_test_[A-Za-z0-9]+$/ : new RegExp('^' + prefix + '_[A-Za-z0-9]+$');
+  const pattern = prefix === 'cs' ? /^cs_test_[A-Za-z0-9]+$/
+    : prefix === 'dp' ? /^(?:dp|du)_[A-Za-z0-9]+$/ : new RegExp('^' + prefix + '_[A-Za-z0-9]+$');
   if (!pattern.test(result || '')) fail(503, 'Identificador Stripe ausente.');
   return result;
 };
