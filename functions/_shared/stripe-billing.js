@@ -3,9 +3,11 @@ import { customer, fail, reply } from './paypal-billing.js';
 export { fail, reply };
 
 export function stripeConfiguration(env) {
-  if (env.STRIPE_BILLING_MODE !== 'test' || !/^sk_test_[A-Za-z0-9]+$/.test(env.STRIPE_TEST_SECRET_KEY || '')) {
-    fail(503, 'Stripe de teste ainda nao configurado.');
-  }
+  if (env.STRIPE_BILLING_MODE !== 'test') fail(503, 'Modo Stripe de teste nao habilitado nesta publicacao.');
+  const key = String(env.STRIPE_TEST_SECRET_KEY || '').trim();
+  if (!key) fail(503, 'Secret STRIPE_TEST_SECRET_KEY ausente nesta publicacao.');
+  if (!/^sk_test_[A-Za-z0-9_]+$/.test(key)) fail(503, 'Formato da chave Stripe invalido. Use a chave secreta de teste completa, nao a publicavel ou de producao.');
+  return key;
 }
 
 export async function stripeCustomer(request, env) {
@@ -15,11 +17,11 @@ export async function stripeCustomer(request, env) {
 }
 
 export async function stripe(env, path, parameters, idempotencyKey) {
-  stripeConfiguration(env);
+  const key = stripeConfiguration(env);
   const response = await fetch('https://api.stripe.com/v1/' + path, {
     method: parameters ? 'POST' : 'GET', redirect: 'manual', signal: AbortSignal.timeout(15000),
     headers: {
-      Authorization: 'Bearer ' + env.STRIPE_TEST_SECRET_KEY,
+      Authorization: 'Bearer ' + key,
       'Stripe-Version': '2024-06-20',
       ...(parameters ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}),
       ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {})

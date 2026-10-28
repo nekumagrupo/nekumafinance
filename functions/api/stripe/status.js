@@ -12,7 +12,9 @@ export async function onRequestPost({ request, env }) {
     if (!/^cs_test_[A-Za-z0-9]+$/.test(reservation.session_id)) fail(503, 'Checkout invalido.');
     const session = await stripe(env, 'checkout/sessions/' + encodeURIComponent(reservation.session_id));
     validateSession(session, user);
-    return reply({ environment: 'test', status: session.status, paymentStatus: session.payment_status, grantsAccess: false });
+    const simulation = env.STRIPE_TEST_ACCESS_ENABLED === 'true'
+      ? await database(env, 'stripe_test_entitlement', { target_user: user.id }) : null;
+    return reply({ environment: 'test', status: session.status, paymentStatus: session.payment_status, grantsAccess: false, simulation });
   } catch (error) {
     return reply({ error: error.status ? error.message : 'Consulta de teste indisponivel.' }, error.status || 503);
   }
