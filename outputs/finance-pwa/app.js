@@ -505,6 +505,7 @@
     if (action === "paypal-sandbox-status") { loadPaypalSandboxStatus(); return; }
     if (action === "stripe-test-status") { stripeTestRequest(false); return; }
     if (action === "stripe-test-checkout") { stripeTestRequest(true); return; }
+    if (action === "stripe-test-clock") { stripeTestRequest(true, true); return; }
     if (action === "set-auth-view") {
       authView = button.dataset.view || "welcome";
       if (authView === "reset" && !isPasswordRecoveryLink) passwordRecoveryStep = "request";
@@ -4999,7 +5000,7 @@
     return renderVerifiedPlansPage();
   }
 
-  async function stripeTestRequest(checkout) {
+  async function stripeTestRequest(checkout, useClock = false) {
     if (stripeTestBusy || !remoteSession.user?.id) return;
     if (checkout && !window.confirm("Stripe TESTE: assinatura ficticia de JPY 480/mes. Nao use cartao real. Pagamentos e reembolsos podem alterar o acesso na conta autorizada. Continuar?")) return;
     const userId = remoteSession.user.id;
@@ -5009,7 +5010,7 @@
       const token = await currentSupabaseAccessToken();
       const response = await fetch(checkout ? "/api/stripe/checkout" : "/api/stripe/status", {
         method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify(checkout ? { plan: "pro" } : {})
+        body: JSON.stringify(checkout ? { plan: "pro", restart: stripeTestSnapshot?.userId === userId && stripeTestSnapshot.canRestart === true, useClock } : {})
       });
       if (!(response.headers.get("Content-Type") || "").includes("application/json")) throw new Error("Stripe de teste ainda nao publicado.");
       const data = await response.json();
@@ -5040,6 +5041,7 @@
       <div role="status" aria-live="polite">${snapshot?.error ? `<p>${escapeHtml(snapshot.error)}</p>` : snapshot ? `<p>${escapeHtml(labels[snapshot.status] || "Aguardando confirmacao")}${snapshot.paymentStatus === "paid" ? " - pagamento de teste confirmado" : ""}</p>` : ""}</div>
       ${snapshot?.simulation ? `<p>Acesso Stripe de teste: <strong>${snapshot.simulation.active ? "PRO" : "Gratis"}</strong></p>${snapshot.simulation.paidUntil ? `<p class="row-meta">Periodo pago ate: ${escapeHtml(new Date(snapshot.simulation.paidUntil).toLocaleString())}</p>` : ""}` : ""}
       ${snapshot && !snapshot.error && ["not_started", "open"].includes(snapshot.status) ? `<button type="button" class="small-action" data-action="stripe-test-checkout" ${stripeTestBusy ? "disabled" : ""}>${snapshot.status === "open" ? "Retomar teste Stripe" : "Testar PRO com Stripe"}</button>` : ""}
+      ${snapshot && !snapshot.error && (snapshot.canRestart || snapshot.status === "not_started") ? `<button type="button" class="small-action" data-action="stripe-test-clock" ${stripeTestBusy ? "disabled" : ""}>Novo ciclo Stripe com relogio de teste</button>` : ""}
     </section>`;
   }
 

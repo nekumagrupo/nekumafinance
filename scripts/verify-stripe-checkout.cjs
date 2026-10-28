@@ -5,8 +5,9 @@ const encode = value => 'data:text/javascript;base64,' + Buffer.from(value).toSt
 (async () => {
   const paypal = encode(fs.readFileSync('functions/_shared/paypal-billing.js', 'utf8'));
   const helper = encode(fs.readFileSync('functions/_shared/stripe-billing.js', 'utf8').replace('./paypal-billing.js', paypal));
+  const cycles = encode(fs.readFileSync('functions/_shared/stripe-cycles.js','utf8').replace('./stripe-billing.js',helper).replace('./paypal-billing.js',paypal));
   const load = async name => import(encode(fs.readFileSync('functions/api/stripe/' + name + '.js', 'utf8')
-    .replace('../../_shared/stripe-billing.js', helper).replace('../../_shared/paypal-billing.js', paypal)));
+    .replace('../../_shared/stripe-billing.js', helper).replace('../../_shared/paypal-billing.js', paypal).replace('../../_shared/stripe-cycles.js',cycles)));
   const checkout = await load('checkout');
   const status = await load('status');
   const env = { STRIPE_BILLING_MODE: 'test', STRIPE_TEST_SECRET_KEY: 'sk_test_fixture', STRIPE_TEST_USERS: 'user',

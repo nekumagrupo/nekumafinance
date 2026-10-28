@@ -1,5 +1,6 @@
 import { stripe, stripeConfiguration, validateSession, fail } from './stripe-billing.js';
 import { database } from './paypal-billing.js';
+import { clockTime } from './stripe-cycles.js';
 
 const supported = new Set(['checkout.session.completed','invoice.paid','invoice.payment_failed',
   'customer.subscription.updated','customer.subscription.deleted','charge.refunded',
@@ -71,14 +72,16 @@ export async function processStripeTestEvent(env, incoming) {
   }
   const user = subscription.metadata?.nekuma_user;
   if (!String(env.STRIPE_TEST_USERS || '').split(',').map(v=>v.trim()).includes(user)) return { ignored: true };
-  const binding = await database(env, 'stripe_test_lookup', { target_user: user });
+  const binding = await database(env, 'stripe_test_lookup_subscription', { target_user: user, target_subscription: subscription.id });
   if (!binding?.session_id) fail(503, 'Vinculo Stripe ainda nao disponivel.');
   session ||= await stripe(env, 'checkout/sessions/' + id(binding.session_id, 'cs'));
   validateSession(session, { id: user });
   if (session.id !== binding.session_id || id(session.subscription,'sub') !== subscription.id
     || subscription.metadata?.nekuma_plan !== 'pro' || subscription.customer !== session.customer
+    || (binding.customer_id && binding.customer_id !== session.customer)
     || (binding.subscription_id && binding.subscription_id !== subscription.id)) fail(400, 'Vinculo da assinatura divergente.');
   const effect = { action: 'state' };
+  const now = await clockTime(env, binding, subscription);
   if (event.type === 'invoice.paid') {
     charge ||= await stripe(env, 'charges/' + id(invoice.charge, 'ch'));
     const line = invoice.lines?.data?.[0];
@@ -89,7 +92,7 @@ export async function processStripeTestEvent(env, incoming) {
       || !['subscription_create','subscription_cycle'].includes(invoice.billing_reason)
       || invoice.lines?.has_more || invoice.lines?.data?.length !== 1 || line.quantity !== 1 || line.proration
       || price?.currency !== 'jpy' || price.unit_amount !== 480 || price.recurring?.interval !== 'month' || price.recurring.interval_count !== 1
-      || !Number.isInteger(from) || !Number.isInteger(until) || until <= from || until-from > 32*86400 || from*1000 > Date.now()+300000
+      || !Number.isInteger(from) || !Number.isInteger(until) || until <= from || until-from > 32*86400 || from*1000 > now+300000
       || charge.status !== 'succeeded' || !charge.paid || charge.amount !== 480 || charge.currency !== 'jpy'
       || id(charge.invoice,'in') !== invoice.id || charge.customer !== session.customer) fail(400, 'Pagamento Stripe divergente.');
     if (charge.amount_refunded > 0 || charge.refunded || charge.disputed) {
