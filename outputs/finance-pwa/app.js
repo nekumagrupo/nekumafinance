@@ -3684,10 +3684,10 @@
 
   function renderFxChangeChip(value) {
     const change = Number(value);
-    const hasValue = Number.isFinite(change);
+    const hasValue = value !== null && value !== undefined && String(value).trim() !== "" && Number.isFinite(change);
     const tone = !hasValue ? "neutral" : change >= 0 ? "positive" : "negative";
     const arrow = !hasValue ? "" : change >= 0 ? "↑" : "↓";
-    return `<span class="fx-change-pill ${tone}">${hasValue ? `${change >= 0 ? "+" : ""}${formatPercent(Math.abs(change))} ${arrow}` : "--"}</span>`;
+    return `<span class="fx-change-pill ${tone}">${hasValue ? `${change >= 0 ? "+" : "-"}${formatPercent(Math.abs(change))} ${arrow}` : "--"}</span>`;
   }
 
   function renderHiddenDetails(title, detail) {
@@ -4095,9 +4095,9 @@
                 <small>${salaryCards.length ? `${salaryCards.length} fonte${salaryCards.length === 1 ? "" : "s"} no mes` : "Cadastre uma fonte de renda"}</small>
                 ${hasCommercialFeature("salary_projection") ? renderWorkspaceSalaryPopover(salaryCards, hideBalance) : `<small>Bruto previsto - Antes dos descontos</small>`}
               </article>
-              <article class="workspace-metric"><span>Dolar / Real</span><strong>${quotes.usdBrl ? formatFxRate(quotes.usdBrl, 4) : "--"}</strong>${renderFxChangeChip(quotes.usdBrlChange)}</article>
-              <article class="workspace-metric"><span>Dolar / Iene</span><strong>${usdJpy ? formatYenRate(usdJpy) : "--"}</strong>${renderFxChangeChip(quotes.usdJpyChange)}</article>
-              <article class="workspace-metric"><span>BTC / Dolar</span><strong>${btcUsd ? formatUsdRate(btcUsd) : "--"}</strong>${renderFxChangeChip(quotes.btcUsdChange)}</article>
+              <article class="workspace-metric workspace-quote"><span>Dolar / Real</span><strong>${quotes.usdBrl ? formatFxRate(quotes.usdBrl, 4) : "--"}</strong>${renderFxChangeChip(quotes.usdBrlChange)}</article>
+              <article class="workspace-metric workspace-quote"><span>Dolar / Iene</span><strong>${usdJpy ? formatYenRate(usdJpy) : "--"}</strong>${renderFxChangeChip(quotes.usdJpyChange)}</article>
+              <article class="workspace-metric workspace-quote"><span>BTC / Dolar</span><strong>${btcUsd ? formatUsdRate(btcUsd) : "--"}</strong>${renderFxChangeChip(quotes.btcUsdChange)}</article>
               ${renderWorkspaceFxConverter()}
               <article class="workspace-metric workspace-update-metric"><span>Atualizado</span><strong>${updatedLabel}</strong><button type="button" data-action="refresh-fx" aria-label="Atualizar cotacoes"><i data-lucide="refresh-cw" aria-hidden="true"></i></button></article>
             </div>

@@ -16,6 +16,7 @@ const publicFiles = [
   "admin.js",
   "privacy.html",
   "terms.html",
+  "como-usar.html",
   "clean.html",
   "app.js",
   "i18n.js",
@@ -84,7 +85,7 @@ function withVersion(fileName, content) {
   if (fileName === "metamask.js") {
     return content.replace(/metamask-connect\.js\?v=\d+/g, `metamask-connect.js?v=${version}`);
   }
-  if (["index.html", "app.html", "admin.html", "privacy.html", "terms.html"].includes(fileName)) {
+  if (["index.html", "app.html", "admin.html", "privacy.html", "terms.html", "como-usar.html"].includes(fileName)) {
     return content
       .replace(/styles\.css\?v=\d+/g, `styles.css?v=${version}`)
       .replace(/home\.(css|js)\?v=\d+/g, (match, extension) => `home.${extension}?v=${version}`)

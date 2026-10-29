@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f3f7f4" />
+  <meta name="robots" content="noindex" />
+  <title>Como usar Nekuma Finance</title>
+  <link rel="icon" href="./assets/nekuma-logo-192.png" type="image/png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./home.css?v=272" />
+</head>
+<body>
+  <a class="skip-link" href="#conteudo" data-copy="skip">Ir para o conteúdo</a>
+  <header class="site-header">
+    <a class="brand" href="./index.html?home=1" aria-label="Nekuma Finance"><img src="./assets/nekuma-logo-192.png" width="42" height="42" alt="" /><span>Nekuma<span class="brand-finance">Finance</span></span></a>
+    <nav class="desktop-nav" aria-label="Principal"><a href="./index.html?home=1#experiencia" data-copy="navExperience">O aplicativo</a><a href="./index.html?home=1#recursos" data-copy="navFeatures">Por que Nekuma?</a><a href="./index.html?home=1#planos" data-copy="navPlans">Planos</a><a href="./como-usar.html" aria-current="page">Como usar Nekuma Finance</a><a href="./index.html?home=1#perguntas" data-copy="navFaq">Dúvidas</a></nav>
+    <div class="header-actions"><span id="home-language"></span><a class="login-link" href="./app.html?auth=login" data-copy="login">Entrar</a><a class="button button-small" href="./app.html?auth=signup"><span data-copy="start">Começar</span><i data-lucide="arrow-up-right" aria-hidden="true"></i></a></div>
+  </header>
+  <main id="conteudo" class="section wrap">
+    <h1>Como usar Nekuma Finance</h1>
+    <div id="guide-content"></div>
+  </main>
+  <footer class="site-footer wrap"><div><a class="brand" href="./index.html"><img src="./assets/nekuma-logo-192.png" width="36" height="36" alt="" /><span>nekuma<span class="brand-finance">finance</span></span></a><p data-copy="footerTag">Uma vida entre países. Suas finanças no mesmo lugar.</p></div><nav aria-label="Informações legais"><a href="./privacy.html" data-copy="privacy">Privacidade</a><a href="./terms.html" data-copy="terms">Termos</a><a href="mailto:suporte@nekumafinance.app" data-copy="support">Suporte</a></nav><small>© 2026 Nekuma Finance</small></footer>
+  <script src="./i18n.js?v=267"></script>
+  <script src="./assets/vendor/lucide.min.js"></script>
+  <script src="./home.js?v=272" defer></script>
+  <dialog id="support-dialog" aria-labelledby="support-title">
+    <button class="support-close" type="button" aria-label="Fechar / Close / 閉じる">×</button>
+    <h2 id="support-title" data-copy="supportTitle">Fale com o Nekuma</h2>
+    <p class="support-destination">suporte@nekumafinance.app</p>
+    <form id="support-form">
+      <label><span data-copy="supportName">Seu nome</span><input name="name" autocomplete="name" required maxlength="100" /></label>
+      <label><span data-copy="supportEmail">Seu e-mail</span><input name="email" type="email" autocomplete="email" required maxlength="254" /></label>
+      <label><span data-copy="supportQuestion">Como podemos ajudar?</span><textarea name="message" rows="5" required minlength="10" maxlength="4000"></textarea></label>
+      <p class="support-note" data-copy="supportPrivacy">Não envie senhas ou dados bancários. Usaremos seu e-mail para responder à sua dúvida.</p>
+      <div id="support-challenge"></div>
+      <p id="support-status" role="status" aria-live="polite"></p>
+      <button class="button" type="submit" disabled data-copy="supportSend">Enviar mensagem</button>
+    </form>
+  </dialog>
+</body>
+</html>
