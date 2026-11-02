@@ -4,6 +4,10 @@
   const PUBLIC_LANGUAGE_KEY = "nekuma-public-language";
   const SUPPORTED = ["pt-BR", "en-US", "ja-JP"];
   const labels = { "pt-BR": "Português", "en-US": "English", "ja-JP": "日本語" };
+  const languageStyle = document.createElement('link');
+  languageStyle.rel = 'stylesheet';
+  languageStyle.href = new URL('./assets/language-selector.css', document.currentScript?.src || window.location.href).href;
+  document.head.append(languageStyle);
 
   const messages = {
     "en-US": {
@@ -586,8 +590,42 @@
 
   function languageSelector(className = "language-selector") {
     const locale = publicLanguage();
-    return `<label class="${className}"><span class="sr-only">Language</span><i data-lucide="languages" aria-hidden="true"></i><select data-public-language aria-label="Language">${SUPPORTED.map((item) => `<option value="${item}" ${item === locale ? "selected" : ""}>${labels[item]}</option>`).join("")}</select></label>`;
+    const codes = { 'pt-BR': 'PT', 'en-US': 'EN', 'ja-JP': 'JA' };
+    const flags = { 'pt-BR': 'br', 'en-US': 'us', 'ja-JP': 'jp' };
+    const flag = item => `<img src="./assets/flag-${flags[item]}.svg" width="22" height="16" alt="" />`;
+    return `<details class="${className} nekuma-language"><summary aria-label="Language: ${labels[locale]}">${flag(locale)}<span data-language-code>${codes[locale]}</span><i data-lucide="chevron-down" aria-hidden="true"></i></summary><div class="nekuma-language-menu" role="group" aria-label="Language">${SUPPORTED.map(item => `<button type="button" data-language-option="${item}" aria-pressed="${item === locale}">${flag(item)}<span>${labels[item]}</span><span class="language-check" aria-hidden="true">${item === locale ? '✓' : ''}</span></button>`).join('')}</div><select data-public-language aria-label="Language" hidden>${SUPPORTED.map(item => `<option value="${item}" ${item === locale ? 'selected' : ''}>${labels[item]}</option>`).join('')}</select></details>`;
   }
+
+  document.addEventListener('click', event => {
+    const option = event.target.closest('[data-language-option]');
+    const picker = option?.closest('.nekuma-language');
+    if (picker) {
+      const select = picker.querySelector('[data-public-language]');
+      select.value = option.dataset.languageOption;
+      const codes = { 'pt-BR': 'PT', 'en-US': 'EN', 'ja-JP': 'JA' };
+      picker.querySelector('[data-language-code]').textContent = codes[select.value];
+      const summary = picker.querySelector('summary');
+      summary.querySelector('img').src = option.querySelector('img').src;
+      summary.setAttribute('aria-label', `Language: ${labels[select.value]}`);
+      picker.querySelectorAll('[data-language-option]').forEach(button => {
+        const selected = button === option;
+        button.setAttribute('aria-pressed', String(selected));
+        button.querySelector('.language-check').textContent = selected ? '✓' : '';
+      });
+      picker.open = false;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    document.querySelectorAll('.nekuma-language[open]').forEach(menu => {
+      if (!menu.contains(event.target)) menu.open = false;
+    });
+  });
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    document.querySelectorAll('.nekuma-language[open]').forEach(menu => {
+      menu.open = false;
+      menu.querySelector('summary').focus();
+    });
+  });
 
   const requestedLanguage = new URLSearchParams(window.location.search).get("lang");
   if (SUPPORTED.includes(requestedLanguage)) setPublicLanguage(requestedLanguage);
