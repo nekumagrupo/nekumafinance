@@ -98,3 +98,35 @@
   .plan-comparison-table th[scope=row], .plan-comparison-table thead th:first-child { position: sticky; left: 0; z-index: 1; box-shadow: 1px 0 0 var(--line); }
   .comparison-value { flex-direction: column; gap: 3px; }
 }
+.wise-rate-band { --ink: #163300; --green: #163300; --muted: #355520; --line: #16330033; color: var(--ink); background: #9fe870; border-block: 1px solid var(--line); }
+.wise-rate-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .9fr); align-items: center; gap: 64px; }
+.wise-rate-band .wise-rate-layout { padding-block: 44px; gap: 40px; }
+.wise-rate-copy .eyebrow { margin-bottom: 12px; }
+.wise-rate-copy > .wise-rate-disclaimer { margin-bottom: 0; }
+.wise-rate-refresh { display: flex; justify-content: center; margin: 4px 0 14px; }
+.wise-rate-refresh button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; padding: 9px 16px; border-radius: 6px; border: 1px solid #163300; background: #163300; color: #d8f9c4; font-size: 12px; font-weight: 700; }
+.wise-rate-refresh button:hover { background: #244b0b; }
+.wise-rate-refresh button:disabled { opacity: .65; cursor: progress; }
+.wise-rate-refresh svg { width: 16px; height: 16px; }
+@media(max-width:700px) { .wise-rate-band .wise-rate-layout { padding-block: 32px; gap: 24px; } }
+.wise-rate-copy h2 { max-width: 540px; }
+.wise-rate-copy > p:not(.eyebrow) { max-width: 530px; line-height: 1.8; }
+.wise-rate-copy .text-link { margin: 12px 0; }
+.wise-rate-disclaimer { color: var(--muted); font-size: 12px; line-height: 1.7; }
+.wise-rate-example { margin: 0; padding: 24px 0 0; border-top: 2px solid #16330055; min-width: 0; }
+.wise-rate-example figcaption { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; font-size: 12px; font-weight: 700; }
+.wise-rate-pair { display: grid; grid-template-columns: minmax(0, 1fr) 22px minmax(0, 1.2fr); gap: 16px; align-items: center; padding: 24px 0; }
+.wise-rate-pair > div { display: grid; gap: 12px; min-width: 0; }
+.wise-rate-pair span { color: var(--muted); font-size: 12px; }
+.wise-rate-pair strong { font-size: 28px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.wise-rate-pair svg { width: 22px; height: 22px; color: #163300; }
+.wise-rate-band .text-link:hover { color: #294f10; }
+#wise-rate-title { scroll-margin-top: 150px; }
+@media (max-width: 700px) {
+  .wise-rate-layout { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  .wise-rate-pair { gap: 10px; grid-template-columns: minmax(0, 1fr) 20px minmax(0, 1.2fr); }
+  .wise-rate-pair strong { font-size: 23px; }
+}
+.section { padding-block: 72px; }
+@media(max-width:800px) { .section { padding-block: 52px; } }
+@media(max-width:520px) { .section { padding-block: 40px; } }

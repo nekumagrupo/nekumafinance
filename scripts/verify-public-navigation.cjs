@@ -7,7 +7,7 @@ function load(hostname, search = '') {
   const values = new Map();
   const context = {
     window: { location: { hostname, search, href: `https://${hostname}/${search}` } },
-    document: { documentElement: {} }, navigator: { language: 'pt-BR' },
+    document: { documentElement: {}, createElement: () => ({}), head: { append() {} }, addEventListener() {} }, navigator: { language: 'pt-BR' },
     localStorage: { getItem: k => values.get(k), setItem: (k, v) => values.set(k, v) },
     URL, URLSearchParams
   };

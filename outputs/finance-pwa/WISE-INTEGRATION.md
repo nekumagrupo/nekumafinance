@@ -23,3 +23,11 @@ No account balance, profile, recipient or transfer endpoints are used.
 
 Local verification: node scripts/verify-wise-rate.cjs
 Reference: https://docs.wise.com/guides/product/send-money/quotes/affiliates
+
+Public home preview: GET /api/wise/public-rate on nekumafinance.app only.
+No session required. Fixed JPY -> BRL pair, no query parameters, no user account
+data or referral configuration returned. Concurrent requests share an in-flight
+lookup and the rate is cached for five minutes per worker instance; responses
+also declare public cache lifetimes. Refresh errors retain the previous value
+and its date. The static local preview does not execute Pages Functions.
+Test: node scripts/verify-wise-public.cjs

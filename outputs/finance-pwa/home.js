@@ -1,6 +1,44 @@
 (() => {
   'use strict';
   const i18n = window.NekumaI18n;
+  let wiseHomeQuote = null;
+  let wiseHomeBusy = false;
+  let wiseHomeFailed = false;
+  const wiseRefreshCopy = {
+    'pt-BR': { button:'Atualizar cotação', loading:'Consultando Wise…', sample:'Exemplo de 03/11/2026. Não é cotação atual. Tarifas de transferência não incluídas.', updated:'Câmbio Wise consultado em', fees:'Tarifas de transferência não incluídas. Cache de até 5 minutos.', error:'Não foi possível atualizar. O valor anterior foi mantido.' },
+    'en-US': { button:'Refresh exchange rate', loading:'Checking Wise…', sample:'Example from November 3, 2026, not a current quote. Transfer fees excluded.', updated:'Wise exchange rate checked at', fees:'Transfer fees excluded. Cached for up to 5 minutes.', error:'Unable to refresh. The previous value was retained.' },
+    'ja-JP': { button:'レートを更新', loading:'Wiseに照会中…', sample:'2026年11月3日の例です。現在のレートではなく、送金手数料は含まれません。', updated:'Wise為替レートの確認日時', fees:'送金手数料は含まれません。最大5分間キャッシュされます。', error:'更新できませんでした。前の値を表示しています。' }
+  };
+  function renderWiseHomeQuote() {
+    const locale = i18n?.publicLanguage() || 'pt-BR';
+    const copy = wiseRefreshCopy[locale] || wiseRefreshCopy['pt-BR'];
+    const button = document.querySelector('[data-wise-home-refresh]');
+    const status = document.querySelector('[data-wise-home-status]');
+    if (!button || !status) return;
+    button.disabled = wiseHomeBusy;
+    button.querySelector('span').textContent = wiseHomeBusy ? copy.loading : copy.button;
+    if (wiseHomeQuote) document.querySelector('[data-wise-home-value]').textContent = '≈ ' + new Intl.NumberFormat(locale, { style:'currency', currency:'BRL' }).format(10000 * wiseHomeQuote.rate);
+    status.textContent = [wiseHomeFailed ? copy.error : '', wiseHomeQuote ? `${copy.updated} ${new Date(wiseHomeQuote.time).toLocaleString(locale)}. ${copy.fees}` : copy.sample].filter(Boolean).join(' ');
+  }
+  document.addEventListener('click', async event => {
+    if (!event.target.closest('[data-wise-home-refresh]') || wiseHomeBusy) return;
+    wiseHomeBusy = true; wiseHomeFailed = false; renderWiseHomeQuote();
+    try {
+      const response = await fetch('/api/wise/public-rate', { signal: AbortSignal.timeout(15000) });
+      if (!response.ok || !(response.headers.get('Content-Type') || '').includes('application/json')) throw new Error('unavailable');
+      const data = await response.json();
+      const stamp = Date.parse(data?.time);
+      if (data.source !== 'JPY' || data.target !== 'BRL' || !Number.isFinite(data.rate) || data.rate <= 0
+        || !Number.isFinite(stamp) || stamp > Date.now() + 300000 || stamp < Date.now() - 3600000) throw new Error('invalid');
+      wiseHomeQuote = data;
+    } catch { wiseHomeFailed = true; }
+    finally { wiseHomeBusy = false; renderWiseHomeQuote(); }
+  });
+  const wiseCopy = {
+    'pt-BR': { wiseEyebrow:'CÂMBIO COM DADOS DA WISE', wiseTitle:'Seu dinheiro entre Japão e Brasil.', wiseDescription:'Consulte o câmbio com dados da Wise diretamente no conversor do Nekuma. Compare ienes e reais sem sair da sua organização financeira.', wiseCta:'Consultar no aplicativo', wiseDisclaimer:'Consulta informativa. O Nekuma não executa transferências. O uso da API Wise não representa uma parceria comercial aprovada.', wiseExample:'Exemplo real do aplicativo', wiseExampleNote:'Exemplo consultado em 03/11/2026. Não é uma cotação atual: o câmbio varia e tarifas de transferência não estão incluídas.' },
+    'en-US': { wiseEyebrow:'EXCHANGE RATES FROM WISE', wiseTitle:'Your money between Japan and Brazil.', wiseDescription:'Check Wise exchange rates directly in the Nekuma converter. Compare yen and reais alongside your financial records.', wiseCta:'Check rates in the app', wiseDisclaimer:'For information only. Nekuma does not execute transfers. API access does not imply an approved commercial partnership with Wise.', wiseExample:'Actual app example', wiseExampleNote:'Example checked on November 3, 2026. Not a current quote: rates vary and transfer fees are not included.' },
+    'ja-JP': { wiseEyebrow:'WISEの為替データ', wiseTitle:'日本とブラジルをつなぐお金の管理。', wiseDescription:'Nekumaの通貨換算でWiseの為替レートを確認。家計の記録と一緒に円とレアルを比較できます。', wiseCta:'アプリでレートを確認', wiseDisclaimer:'参考情報です。Nekumaは送金を実行しません。APIの利用はWiseとの商業提携の承認を意味するものではありません。', wiseExample:'実際のアプリ画面', wiseExampleNote:'2026年11月3日の参考例であり、現在のレートではありません。為替は変動し、送金手数料は含まれません。' }
+  };
   const translations = {
     'en-US': {
       skip:'Skip to content',navExperience:'The app',navFeatures:'Why Nekuma?',navFaq:'Questions',login:'Sign in',start:'Get started',
@@ -102,7 +140,7 @@
     const locale = i18n?.publicLanguage() || 'pt-BR';
     document.documentElement.lang = locale;
     originals.forEach((html, element) => {
-      const text = translations[locale]?.[element.dataset.copy];
+      const text = wiseCopy[locale]?.[element.dataset.copy] || translations[locale]?.[element.dataset.copy];
       if (text) element.textContent = text;
       else element.innerHTML = html;
     });
@@ -114,6 +152,7 @@
     const picker = languageSlot?.querySelector('select');
     if (picker) picker.value = locale;
     renderPricing(locale);
+    renderWiseHomeQuote();
     if (window.lucide) window.lucide.createIcons();
   }
   document.addEventListener('change', event => {
