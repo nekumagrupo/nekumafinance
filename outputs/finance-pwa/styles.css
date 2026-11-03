@@ -13209,3 +13209,27 @@ body[data-workspace-theme] .tab-card-columns .content-panel {
   line-height: 1.25;
 }
 .workspace-converter-metric .workspace-converter-controls > span { font-size: 0.95rem; }
+/* The Wise action remains separate from financial calculations and account data. */
+.fx-converter-card .wise-converter-action { display: grid; grid-template-columns: minmax(0, 1fr); gap: 7px; min-width: 0; margin-top: 2px; padding-top: 9px; border-top: 1px solid currentColor; border-color: color-mix(in srgb, currentColor 18%, transparent); }
+.fx-converter-card .wise-converter-action button { display: grid; grid-template-columns: 16px minmax(0, 1fr) 16px; align-items: center; justify-content: center; gap: 8px; width: 100%; min-width: 0; min-height: 36px; margin: 0; padding: 8px 11px; border: 1px solid #b1d875; border-radius: 6px; background: #d6f4aa; color: #163720; box-shadow: none; font-size: 0.78rem; font-weight: 750; line-height: 1.3; text-transform: none; letter-spacing: 0; cursor: pointer; }
+.fx-converter-card .wise-converter-action button svg { width: 16px; height: 16px; stroke: currentColor; fill: none; }
+.fx-converter-card .wise-converter-action button span { color: inherit; font: inherit; text-align: center; white-space: normal; }
+.fx-converter-card .wise-converter-action button:hover { background: #c4eb8b; border-color: #8ebf55; }
+.fx-converter-card .wise-converter-action button:focus-visible { outline: 3px solid #4ea5ef; outline-offset: 3px; }
+.fx-converter-card .wise-converter-action button:disabled { opacity: .65; cursor: progress; }
+.fx-converter-card .wise-converter-action small { display: block; min-width: 0; margin: 0; font-size: 0.65rem; font-weight: 500; line-height: 1.5; text-transform: none; letter-spacing: 0; overflow-wrap: anywhere; }
+.fx-converter-card .wise-converter-action a { font-size: 0.78rem; font-weight: 650; text-underline-offset: 3px; }
+.fx-converter-card .wise-converter-action [hidden] { display: none; }
+.workspace-metric.workspace-converter-metric { gap: 10px; align-content: start; }
+.workspace-converter-metric .workspace-converter-head { display: flex; justify-content: space-between; align-items: baseline; }
+.workspace-converter-metric .workspace-converter-head > span { font-size: 0.68rem; font-weight: 700; }
+.workspace-converter-metric .workspace-converter-head > strong { font-size: 1rem; font-variant-numeric: tabular-nums; }
+.workspace-converter-metric .workspace-converter-controls { grid-template-columns: minmax(38px, 1fr) minmax(60px, 1fr) 8px minmax(60px, 1fr); gap: 4px; }
+.workspace-converter-metric .workspace-converter-controls input,
+.workspace-converter-metric .workspace-converter-controls select { border-radius: 6px; font-size: 0.8rem; padding: 5px 3px; font-variant-numeric: tabular-nums; }
+@media (max-width: 760px) {
+  .fx-converter-card .wise-converter-action button { min-height: 42px; font-size: 0.85rem; }
+  .fx-converter-card .wise-converter-action small { font-size: 0.72rem; }
+  .workspace-converter-metric .workspace-converter-controls input,
+  .workspace-converter-metric .workspace-converter-controls select { height: 40px; font-size: 1rem; }
+}

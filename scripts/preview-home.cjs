@@ -8,6 +8,16 @@ http.createServer((request, response) => {
   let target;
   try {
     const pathname = decodeURIComponent(new URL(request.url, 'http://localhost').pathname);
+    if (pathname === '/__preview/wise-card') {
+      response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      response.end(require('./wise-preview.cjs')());
+      return;
+    }
+    if (pathname.startsWith('/api/')) {
+      response.writeHead(503, { 'Content-Type':'application/json', 'Cache-Control':'no-store' });
+      response.end(JSON.stringify({ error: 'A previa local nao executa as funcoes do Cloudflare. A consulta Wise requer publicacao e configuracao do token no servidor.' }));
+      return;
+    }
     target = path.resolve(root, `.${pathname === '/' ? '/index.html' : pathname}`);
     if (!target.startsWith(root + path.sep)) throw new Error('Invalid path');
     const content = fs.readFileSync(target);

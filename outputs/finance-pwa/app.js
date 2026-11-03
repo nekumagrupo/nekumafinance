@@ -1425,12 +1425,18 @@
     persistLocalState();
     remoteSession.lastSyncedAt = data?.updated_at || null;
     if (shouldRewriteRemoteState || ((!data?.state || !Object.keys(data.state).length) && createIfEmpty)) {
+      if (data?.state && Object.keys(data.state).length && commercialSnapshot()?.plan === "free") {
+        // Loading an existing downgraded account is read-only. Pending local data
+        // stays available for a later explicit save; never prune premium records.
+        lastLocalChangeAt = Math.max(Date.now(), (Date.parse(remoteSession.lastSyncedAt || "") || 0) + 1);
+        return;
+      }
       try { await flushRemoteState(); }
       catch (error) {
-        if (!error.planRestricted) throw error;
+        if (!error.planRestricted && !/\bPLAN_(?:LIMIT|FEATURE)\b|Plano Familia necessario/.test(error.message || "")) throw error;
         // A rejected reconciliation is not a rejected authentication. Keep pending data.
         lastLocalChangeAt = Math.max(Date.now(), (Date.parse(remoteSession.lastSyncedAt || "") || 0) + 1);
-        remoteSession.error = error.message;
+        remoteSession.error = "Seu acesso continua liberado. Uma alteracao pendente excede os limites do plano; os dados foram preservados neste aparelho.";
       }
     }
   }
@@ -2591,6 +2597,28 @@
     return Date.parse(snapshot?.resetAt || "") || 0;
   }
 
+  function mergeSavedWallets(remote, local) {
+    if (typeof window.NekumaMetaMask?.mergeWallets === "function") return window.NekumaMetaMask.mergeWallets(remote, local);
+    // Login must not depend on loading a wallet provider. Preserve saved balances
+    // and timestamped removals even when the optional integration is unavailable.
+    const time = value => Date.parse(value?.updatedAt || "") || 0;
+    const records = value => value?.wallets?.length ? value.wallets : value?.address ? [value] : [];
+    if (!records(remote).length && time(remote) > time(local)) return remote;
+    if (!records(local).length && time(local) > time(remote)) return local;
+    const wallets = new Map();
+    for (const wallet of [...records(remote), ...records(local)]) {
+      const key = wallet.chainId + ":" + wallet.address.toLowerCase();
+      const previous = wallets.get(key);
+      if (!previous) { wallets.set(key, { ...wallet, wallets: [] }); continue; }
+      const newer = time(wallet) >= time(previous) ? wallet : previous;
+      const older = newer === wallet ? previous : wallet;
+      const tokens = new Map((older.tokens || []).map(token => [token.contract.toLowerCase(), { ...token, stale: true }]));
+      for (const token of newer.tokens || []) tokens.set(token.contract.toLowerCase(), token);
+      wallets.set(key, { ...newer, wallets: [], tokens: [...tokens.values()] });
+    }
+    return { ...(time(local) >= time(remote) ? local : remote), wallets: [...wallets.values()] };
+  }
+
   function reconcileRemoteState(rawRemote, local) {
     const remote = normalizeState(rawRemote);
     const remoteReset = resetTime(remote);
@@ -2601,7 +2629,7 @@
     const crypto = mergeCryptoAssetsWithLocal(remote.cryptoAssets, local.cryptoAssets);
     const merged = mergeLocalCollections(remote, local, ["incomeSources", "workIncomes", "workScheduleOverrides", "familyMembers", "familyBusinesses", "shoppingLists", "receipts", "vehicles", "nubankBoxes", "nubankBoxContributions", "financialSnapshots", "achievementLedger", "categoryBudgets"]);
     const deletedItems = mergeDeletedItems(remote.deletedItems, local.deletedItems);
-    const mergedWallet = window.NekumaMetaMask.mergeWallets(remote.web3Wallet, local.web3Wallet);
+    const mergedWallet = mergeSavedWallets(remote.web3Wallet, local.web3Wallet);
     const walletChanged = JSON.stringify(mergedWallet) !== JSON.stringify(remote.web3Wallet);
     const next = { ...remote, ...merged.collections, cryptoAssets: crypto.items, deletedItems, ui: local.ui, web3Wallet: mergedWallet };
     for (const [collection, deletions] of Object.entries(deletedItems)) {
@@ -3539,6 +3567,7 @@
             ${fxConverterCurrencyOptions("BRL")}
           </select>
         </div>
+        ${renderWiseConverterAction()}
       </article>
     `;
   }
@@ -3558,7 +3587,65 @@
     const result = convert(amount, from, to, latestRate());
     const output = card.querySelector("[data-fx-converter-result]");
     if (output) output.textContent = formatMoney(result, to);
+    const wise = card.querySelector('[data-wise-status]');
+    if (wise) wise.textContent = 'Cotacao estimada · sem tarifas';
   }
+
+  function renderWiseConverterAction() {
+    return `<div class="wise-converter-action"><button type="button" data-wise-rate><i data-lucide="refresh-cw" aria-hidden="true"></i><span>Consultar Wise</span><i data-lucide="arrow-up-right" aria-hidden="true"></i></button><small data-wise-status aria-live="polite">Cotacao estimada · sem tarifas</small><a data-wise-affiliate hidden target="_blank" rel="sponsored noopener noreferrer">Conhecer a Wise</a><small data-wise-disclosure hidden>Link de afiliado: podemos receber comissao por indicacoes elegiveis.</small></div>`;
+  }
+
+  async function readWiseRateResponse(response) {
+    if (!(response.headers.get('Content-Type') || '').includes('application/json')) {
+      throw new Error('Consulta Wise indisponivel neste servidor. A previa local nao executa a integracao do Cloudflare.');
+    }
+    let data;
+    try { data = await response.json(); }
+    catch { throw new Error('Resposta Wise invalida. Tente novamente mais tarde.'); }
+    if (!response.ok) throw new Error(data?.error || 'Wise indisponivel.');
+    if (!data || typeof data !== 'object') throw new Error('Resposta Wise invalida.');
+    return data;
+  }
+
+  document.addEventListener('click', async event => {
+    const button = event.target.closest('[data-wise-rate]');
+    if (!button || button.disabled) return;
+    const card = button.closest('.fx-converter-card');
+    const status = card.querySelector('[data-wise-status]');
+    const source = card.querySelector('.fx-converter-from').value;
+    const target = card.querySelector('.fx-converter-to').value;
+    const amount = Number(card.querySelector('.fx-converter-amount').value);
+    if (!Number.isFinite(amount) || amount < 0 || source === target) {
+      status.textContent = 'Informe um valor valido e moedas diferentes.';
+      return;
+    }
+    button.disabled = true;
+    status.textContent = 'Consultando Wise...';
+    try {
+      const token = await currentSupabaseAccessToken();
+      if (!token) throw new Error('Entre na sua conta para consultar a Wise.');
+      const response = await fetch('/api/wise/rate?' + new URLSearchParams({ source, target }), {
+        method: 'POST', headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15000)
+      });
+      const data = await readWiseRateResponse(response);
+      if (source !== card.querySelector('.fx-converter-from').value || target !== card.querySelector('.fx-converter-to').value
+        || amount !== Number(card.querySelector('.fx-converter-amount').value)) return;
+      if (!(Number.isFinite(data.rate) && data.rate > 0) || data.source !== source || data.target !== target) throw new Error('Cotacao Wise invalida.');
+      card.querySelector('[data-fx-converter-result]').textContent = formatMoney(amount * data.rate, target);
+      status.textContent = `Cambio Wise · ${new Date(data.time).toLocaleString()} · sem tarifas de transferencia.`;
+      if (data.affiliateUrl) {
+        const link = new URL(data.affiliateUrl);
+        if (link.protocol === 'https:' && ['wise.com', 'wise.prf.hn'].includes(link.hostname)) {
+          const anchor = card.querySelector('[data-wise-affiliate]');
+          anchor.href = link.href;
+          anchor.hidden = false;
+          card.querySelector('[data-wise-disclosure]').hidden = false;
+        }
+      }
+    } catch (error) {
+      status.textContent = error.message || 'Consulta Wise indisponivel.';
+    } finally { button.disabled = false; }
+  });
 
   function renderCurrentTab() {
     const tab = state.ui.activeTab;
@@ -4123,6 +4210,7 @@
           <span aria-hidden="true">→</span>
           <select class="fx-converter-to" aria-label="Moeda de destino no dashboard">${fxConverterCurrencyOptions("BRL")}</select>
         </div>
+        ${renderWiseConverterAction()}
       </article>
     `;
   }
@@ -4797,7 +4885,7 @@
 
   function renderAccounts() {
     const accounts = activeBankAccounts();
-    const incomeSources = (state.incomeSources || []).filter((item) => item.active !== false);
+    const incomeSources = userIncomeSources().filter((item) => item.active !== false);
     return `
       <div class="detail-page-shell">
         ${renderPageIntro("Banking", "Contas e rendas", "Cadastre onde o dinheiro entra, acompanhe saldos e mantenha o vinculo entre empresa, salario e conta de recebimento.", `<button class="secondary-button" type="button" data-action="open-modal" data-modal="incomeSource">Nova empresa</button><button class="primary-button" type="button" data-action="open-modal" data-modal="bankAccount">Nova conta</button>`)}
@@ -4871,7 +4959,7 @@
   }
 
   function renderCardsPage() {
-    const activeCards = (state.creditCards || []).filter((item) => item.active !== false);
+    const activeCards = planVisibleRecords(state.creditCards || []).filter((item) => item.active !== false);
     const billTotal = activeCards.reduce((total, card) => total + convert(creditCardMonthBill(card, state.ui.selectedMonth).total, card.currency, primaryCurrency(), latestRate(state.ui.selectedMonth)), 0);
     const selected = activeCards[normalizeCardCarouselIndex(activeCards.length)] || activeCards[0];
     const futureTotal = activeCards.reduce((total, card) => total + Array.from({ length: 6 }, (_, index) => addMonths(state.ui.selectedMonth, index + 1)).reduce((cardTotal, month) => cardTotal + convert(creditCardMonthBill(card, month).total, card.currency, primaryCurrency(), latestRate(month)), 0), 0);
@@ -6031,10 +6119,19 @@
     return remoteSession.user?.id && remoteSession.commercialAccess?.userId === remoteSession.user.id ? remoteSession.commercialAccess : null;
   }
 
+  function planVisibleRecords(records) {
+    if (commercialSnapshot()?.plan !== "free") return records;
+    const active = records.filter(item => item.active !== false);
+    if (!active.length) return [];
+    // Legacy records without timestamps retain their original persisted order.
+    if (active.some(item => !Number.isFinite(Date.parse(item.createdAt || item.created_at || "")))) return active.slice(0, 1);
+    return active.slice().sort((a, b) => Date.parse(a.createdAt || a.created_at) - Date.parse(b.createdAt || b.created_at)).slice(0, 1);
+  }
+
   function preserveRestrictedRecordFormats(rawRemote, nextState) {
     if (!rawRemote) return nextState;
     const normalized = normalizeState(rawRemote);
-    const frozen = ["creditCards", "cardPurchases"];
+    const frozen = ["bankAccounts", "incomeSources", "creditCards", "cardPurchases"];
     if (!hasCommercialFeature("wealth")) frozen.push("investments", "debts", "nubankBoxes", "nubankBoxContributions");
     if (!hasCommercialFeature("wealth")) frozen.push("financialGoals", "categoryBudgets");
     if (!hasCommercialFeature("automation")) frozen.push("categorizationRules");
@@ -6570,7 +6667,7 @@
   }
 
   function renderCreditCardsPanel(limit) {
-    const cards = state.creditCards || [];
+    const cards = planVisibleRecords(state.creditCards || []);
     if (!cards.length) return `<p class="empty-state">Nenhum cartao cadastrado.</p>`;
     const visible = limit ? cards.slice(0, limit) : cards;
 
@@ -16951,7 +17048,7 @@
   }
 
   function userIncomeSources() {
-    return (state.incomeSources || []).filter(isCurrentUserWorkItem);
+    return planVisibleRecords((state.incomeSources || []).filter(isCurrentUserWorkItem));
   }
 
   function userWorkIncomes() {
@@ -18193,7 +18290,7 @@
   }
 
   function activeBankAccounts() {
-    return (state.bankAccounts || [])
+    return planVisibleRecords(state.bankAccounts || [])
       .filter((account) => account.active !== false)
       .slice()
       .sort((a, b) => {
