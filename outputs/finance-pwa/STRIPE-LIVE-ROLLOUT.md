@@ -1,6 +1,8 @@
 # Stripe LIVE rollout
 
-Status: implementation in progress; real checkout is NOT enabled.
+Status: published for restricted validation, not enabled for public sales.
+Commit cfed048 deployed as f6a9cedb-c8c8-4ee8-8398-cfaf4228bccb.
+Database reservation gate enabled with approval; API public flag remains false.
 Migration v18 was applied with user approval on 2026-11-04, with sales disabled.
 Supabase saved query: 2b858526-9f35-4d7f-bb11-1a573357560f.
 Lifecycle v19 applied with approval: 2f8789f8-c7fe-4db5-b198-ae06307a4050.
@@ -42,7 +44,10 @@ The app's free three-day trial must not silently become a recurring charge.
 - Run replay, out-of-order event, refund, dispute and authorization regression tests.
 - Obtain approval before applying production migrations or creating the LIVE webhook.
 - Configure secrets directly in Cloudflare; publish with sales still disabled.
-- User completes an explicitly approved real purchase; verify the webhook and access.
+- Do not use a real card for a synthetic test. Stripe prohibits live-mode testing
+  with real payment method details: https://docs.stripe.com/testing .
+- Observe the first legitimate customer purchase and verify webhook/access; do not
+  describe it as a simulated or self-funded test transaction.
 - Enable public sales only after reviewing the resulting evidence.
 
 ## Checks
@@ -71,3 +76,30 @@ No existing LIVE secret was present in the account. The user will create
 The server accepts `sk_live_` and restricted `rk_live_` credentials. Secrets must
 remain in Cloudflare; do not commit, print or transmit them through chat.
 The LIVE webhook secret is distinct from the TEST webhook secret.
+
+## Production preflight, 2026-11-05
+
+The authenticated app status succeeded and initially reported Free, no paid LIVE period.
+Hosted Checkout created a LIVE session for the authorized account. Stripe's own
+`get_order_summary` returned livemode true, currency jpy, total 480, product Nekuma PRO.
+The checkout visibly showed monthly recurrence and merchant Nekuma Grupo. No payment
+was submitted by the agent.
+
+Initial blocker: an unsigned POST to the published LIVE webhook returned 503, indicating
+the signing secret is absent/malformed in that deployment. The expected result
+for an unsigned request after configuration is 400, never a plan grant.
+The user must replace STRIPE_LIVE_WEBHOOK_SECRET directly in Cloudflare with the
+complete whsec_ value for the LIVE destination, then redeploy and repeat preflight.
+Do not enable public sales until this is resolved and signed deliveries are verified.
+
+The user replaced the signing secret directly in Cloudflare. Deployment
+`baad73db-8406-4cf9-88ba-4997cad0ccfa` of cfed048 completed successfully on
+2026-11-05 (Tokyo). After redeployment:
+- Unsigned LIVE webhook POST: HTTP 400, invalid signature (configuration error resolved).
+- Unauthenticated same-origin LIVE checkout POST: HTTP 401, sign-in required.
+
+These probes establish configuration presence/format and negative security checks,
+NOT that the stored secret matches a genuine signed Stripe delivery. No real
+charge, refund, renewal or signed LIVE delivery has been verified. Public sales
+remain disabled. Observe signed deliveries from a legitimate purchase, or use an
+official non-financial diagnostic if available; never use real cards for a test.

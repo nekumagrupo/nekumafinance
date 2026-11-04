@@ -16,7 +16,9 @@ const id = (value, prefix) => {
 export async function verifiedStripeEvent(request, env, live = false) {
   if (!live) stripeConfiguration(env);
   const secret = String((live ? env.STRIPE_LIVE_WEBHOOK_SECRET : env.STRIPE_TEST_WEBHOOK_SECRET) || '').trim();
-  if (!/^whsec_[A-Za-z0-9_]+$/.test(secret)) fail(503, 'Webhook Stripe de teste ainda nao configurado.');
+  if (!/^whsec_[A-Za-z0-9_]+$/.test(secret)) fail(503, live
+    ? 'Segredo de assinatura do webhook Stripe LIVE ausente ou invalido.'
+    : 'Webhook Stripe de teste ainda nao configurado.');
   const fields = (request.headers.get('Stripe-Signature') || '').split(',').map(part => part.trim().split('='));
   const timestamps = fields.filter(([key]) => key === 't');
   const timestamp = timestamps[0]?.[1];
