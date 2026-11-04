@@ -1,0 +1,33 @@
+const fs = require('node:fs'), vm = require('node:vm'), assert = require('node:assert/strict');
+const store = new Map();
+const storage = { getItem:key=>store.get(key)||null, setItem:(key,value)=>store.set(key,String(value)), removeItem:key=>store.delete(key) };
+const element = () => ({style:{},dataset:{},classList:{add(){},remove(){},toggle(){},contains(){return false}},addEventListener(){},querySelector(){return null},querySelectorAll(){return []},setAttribute(){}});
+const document = {getElementById:element,querySelector(){return null},querySelectorAll(){return []},addEventListener(){},body:element(),documentElement:element()};
+const window = {location:{search:'',hash:'',hostname:'localhost',origin:'http://localhost',pathname:'/app.html'},addEventListener(){},matchMedia:()=>({matches:false,addEventListener(){}}),innerWidth:1440,confirm:()=>true};
+const hooks = `window.qa={renderReferralPage,referralCode,referralLink,captureReferralAttribution,refreshReferralProgram,remoteStore,remoteSession,
+ setup:(snapshot)=>{remoteSession.user={id:'owner'};remoteSession.commercialAccess={userId:'owner',plan:'free'};referralSnapshot=snapshot;state.commercial.referralCredits=999999;state.commercial.referralCode='FORGED';renderKeepingScroll=()=>{};showToast=()=>{};loadCommercialAccess=async()=>{};}};`;
+vm.runInNewContext(fs.readFileSync('outputs/finance-pwa/app.js','utf8').replace('  initApp();',hooks), { window, document, localStorage:storage, sessionStorage:storage, navigator:{}, URL, URLSearchParams, Intl, Date, Number, String, Math, Map, Set, WeakSet, JSON, console, setTimeout:()=>0, clearTimeout(){},setInterval:()=>0,clearInterval(){} });
+(async()=>{
+ const q=window.qa;
+ q.setup(null);
+ assert.equal(q.referralCode(),'');
+ const disabled=q.renderReferralPage();
+ assert.ok(!disabled.includes('999999') && !disabled.includes('FORGED'),'Browser-local credits and codes never appear as verified rewards');
+ assert.match(disabled,/Programa em preparacao/);
+ const code='A'.repeat(32);
+ q.setup({userId:'owner',enabled:true,code,points:300,approved:3,pending:0,history:[{status:'approved',createdAt:'2026-01-01'}]});
+ assert.equal(q.referralLink(),'https://app.nekumafinance.app/app?auth=signup&ref='+code);
+ assert.match(q.renderReferralPage(),/Indicacao 1/);
+ q.remoteSession.user={id:'other'};
+ assert.equal(q.referralCode(),'','Another session cannot reuse a referral code');
+ q.setup(null);q.remoteStore.client={rpc:async()=>({error:{message:'Schema absent'}})};
+ storage.setItem('nekuma-referral-invite',code);
+ await q.captureReferralAttribution();
+ assert.equal(storage.getItem('nekuma-referral-invite'),code,'An unavailable migration must not break login or lose the pending claim');
+ await q.refreshReferralProgram();
+ assert.match(q.renderReferralPage(),/Nenhum ponto local concede PRO/);
+ q.remoteStore.client={rpc:async()=>({data:{enabled:false}})};
+ await q.captureReferralAttribution();
+ assert.equal(storage.getItem('nekuma-referral-invite'),null);
+ console.log('PASS: referral UI trusts only session-bound server data, disables unverified links, creates attributed signup URLs, hides local forged credits and keeps login independent of schema availability. VM tests.');
+})().catch(error=>{console.error(error);process.exitCode=1;});

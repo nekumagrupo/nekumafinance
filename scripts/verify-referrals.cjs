@@ -1,0 +1,66 @@
+const fs = require('node:fs');
+const assert = require('node:assert/strict');
+const { PGlite } = require('../tmp/commercial-qa/node_modules/@electric-sql/pglite');
+(async () => {
+  const db = new PGlite();
+  const ids = Array.from({length:5}, (_, i) => `00000000-0000-4000-8000-00000000000${i+1}`);
+  const me = async id => db.query("select set_config('request.jwt.claim.sub',$1,false)", [id]);
+  const role = async value => db.query("select set_config('request.jwt.claim.role',$1,false)", [value]);
+  const dashboard = async () => (await db.query('select public.my_referral_dashboard() as value')).rows[0].value;
+  const payment = async (index, event, state='paid', live=true) => db.query(`select public.referral_record_payment($1,$2,$3,$4,'2020-01-02', $5,'jpy',480,true,$6) as value`, [ids[index],event,'in_'+index,'ch_'+index,live,state]);
+  try {
+    await db.exec(`create role anon; create role authenticated; create role service_role;
+      create schema auth; create table auth.users(id uuid primary key,email text,created_at timestamptz default now());
+      create function auth.uid() returns uuid language sql as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
+      create function auth.role() returns text language sql as $$select current_setting('request.jwt.claim.role',true)$$;
+      create function public.commercial_account_active() returns boolean language sql as $$select auth.uid() is not null$$;
+      create table public.commercial_subscriptions(user_id uuid, status text,paid_until timestamptz);
+      create table public.commercial_access_overrides(user_id uuid,plan text,valid_until timestamptz);
+      create table public.commercial_notifications(user_id uuid,plan text);
+      create function public.commercial_effective_plan(target_user uuid) returns text language sql as $$select coalesce((select plan from public.commercial_access_overrides where user_id=target_user),'free')$$;`);
+    for (let i=0;i<ids.length;i++) await db.query('insert into auth.users(id,email) values($1,$2)',[ids[i],`person${i}@example.test`]);
+    const sql = fs.readFileSync('outputs/finance-pwa/supabase-referrals-v17.sql','utf8');
+    await db.exec(sql); await db.exec(sql);
+    await me(ids[0]); await role('authenticated');
+    assert.equal((await dashboard()).enabled,false);
+    await db.exec('update public.referral_settings set enabled=true');
+    const first = await dashboard();
+    assert.match(first.code,/^[A-F0-9]{32}$/);
+    assert.equal((await dashboard()).code,first.code);
+    assert.equal((await db.query('select public.referral_claim($1) as value',[first.code])).rows[0].value,false,'Self-referrals denied');
+    for(let i=1;i<=3;i++) {
+      await me(ids[i]);
+      assert.equal((await db.query('select public.referral_claim($1) as value',[first.code])).rows[0].value,true);
+      assert.equal((await db.query('select public.referral_claim($1) as value',[first.code])).rows[0].value,false,'Attribution immutable');
+    }
+    await me(ids[4]); await db.query("update auth.users set created_at=now()-interval '2 days' where id=$1",[ids[4]]);
+    assert.equal((await db.query('select public.referral_claim($1) as value',[first.code])).rows[0].value,false,'Existing accounts cannot claim');
+    await assert.rejects(payment(1,'evt_guest'),/FORBIDDEN/);
+    await role('service_role');
+    await assert.rejects(payment(1,'evt_test','paid',false),/INVALID_PAYMENT/);
+    await db.exec("update public.referral_attributions set created_at='2020-01-01'");
+    for(let i=1;i<=3;i++) await payment(i,'evt_paid'+i);
+    assert.equal((await payment(1,'evt_paid1')).rows[0].value,false,'Webhook replay does not duplicate');
+    await me(ids[0]); await role('authenticated');
+    assert.equal((await dashboard()).points,300);
+    assert.ok(!JSON.stringify(await dashboard()).includes('example.test'),'No invitee email leaks');
+    await db.exec("update public.referral_credits set verified_at=now()-interval '10 minutes'");
+    await assert.rejects(db.query('select public.redeem_referral_pro()'),/POINTS_OR_VERIFICATION_REQUIRED/);
+    await db.exec('update public.referral_credits set verified_at=now()');
+    await db.query("insert into public.commercial_subscriptions values($1,'active',now()+interval '1 day')",[ids[0]]);
+    await assert.rejects(db.query('select public.redeem_referral_pro()'),/ACTIVE_PLAN/);
+    await db.exec('delete from public.commercial_subscriptions');
+    await db.query('select public.redeem_referral_pro()');
+    assert.equal((await dashboard()).points,0);
+    assert.equal((await db.query('select public.commercial_effective_plan($1) as plan',[ids[0]])).rows[0].plan,'pro');
+    await assert.rejects(db.query('select public.redeem_referral_pro()'),/ACTIVE_PLAN/);
+    await role('service_role'); await payment(1,'evt_refund','refunded');
+    assert.equal((await db.query('select public.commercial_effective_plan($1) as plan',[ids[0]])).rows[0].plan,'free');
+    await payment(1,'evt_replaypaid','paid');
+    assert.equal((await db.query('select status from public.referral_credits where invitee=$1',[ids[1]])).rows[0].status,'reversed');
+    await role('authenticated'); assert.equal((await dashboard()).points,200,'Unreversed points restored from revoked reward');
+    assert.equal((await db.query("select has_table_privilege('authenticated','public.referral_credits','UPDATE') as allowed")).rows[0].allowed,false);
+    assert.equal((await db.query("select has_function_privilege('anon','public.my_referral_dashboard()','EXECUTE') as allowed")).rows[0].allowed,false);
+    console.log('PASS: disabled default, private tables, immutable new-account attribution, self-referral rejection, live-only service events, idempotency, fresh verification, 300 points/30 days, paid-plan guard, reward reversal and privacy. Disposable PostgreSQL; not live Stripe.');
+  } finally { await db.close(); }
+})().catch(error => { console.error(error); process.exitCode=1; });

@@ -7,15 +7,15 @@ const supported = new Set(['checkout.session.completed','invoice.paid','invoice.
   'charge.dispute.created','charge.dispute.updated','charge.dispute.closed']);
 const id = (value, prefix) => {
   const result = typeof value === 'string' ? value : value?.id;
-  const pattern = prefix === 'cs' ? /^cs_test_[A-Za-z0-9]+$/
+  const pattern = prefix === 'cs' ? /^cs_(?:test|live)_[A-Za-z0-9]+$/
     : prefix === 'dp' ? /^(?:dp|du)_[A-Za-z0-9]+$/ : new RegExp('^' + prefix + '_[A-Za-z0-9]+$');
   if (!pattern.test(result || '')) fail(503, 'Identificador Stripe ausente.');
   return result;
 };
 
-export async function verifiedStripeEvent(request, env) {
-  stripeConfiguration(env);
-  const secret = String(env.STRIPE_TEST_WEBHOOK_SECRET || '').trim();
+export async function verifiedStripeEvent(request, env, live = false) {
+  if (!live) stripeConfiguration(env);
+  const secret = String((live ? env.STRIPE_LIVE_WEBHOOK_SECRET : env.STRIPE_TEST_WEBHOOK_SECRET) || '').trim();
   if (!/^whsec_[A-Za-z0-9_]+$/.test(secret)) fail(503, 'Webhook Stripe de teste ainda nao configurado.');
   const fields = (request.headers.get('Stripe-Signature') || '').split(',').map(part => part.trim().split('='));
   const timestamps = fields.filter(([key]) => key === 't');
@@ -44,47 +44,52 @@ export async function verifiedStripeEvent(request, env) {
   let event;
   try { event = JSON.parse(raw); } catch { fail(400, 'Evento invalido.'); }
   id(event.id, 'evt');
-  if (event.livemode !== false || event.account) fail(400, 'Evento fora do ambiente autorizado.');
+  if (event.livemode !== live || event.account) fail(400, 'Evento fora do ambiente autorizado.');
   return event;
 }
 
-export async function processStripeTestEvent(env, incoming) {
+export async function processStripeTestEvent(env, incoming, production = null) {
+  const api = production?.api || stripe;
+  const validate = production?.validate || validateSession;
+  const live = !!production;
   if (!supported.has(incoming.type)) return { ignored: true };
   // Resolve the signed event and all payment objects through this account's test key.
-  const event = await stripe(env, 'events/' + id(incoming.id, 'evt'));
+  const event = await api(env, 'events/' + id(incoming.id, 'evt'));
   if (event.id !== incoming.id || event.type !== incoming.type || event.account) fail(400, 'Evento divergente.');
   const object = event.data?.object;
   let subscription, invoice, charge, session;
   if (event.type.startsWith('checkout.')) {
-    session = await stripe(env, 'checkout/sessions/' + id(object?.id, 'cs'));
-    subscription = await stripe(env, 'subscriptions/' + id(session.subscription, 'sub'));
+    session = await api(env, 'checkout/sessions/' + id(object?.id, 'cs'));
+    subscription = await api(env, 'subscriptions/' + id(session.subscription, 'sub'));
   } else if (event.type.startsWith('customer.subscription.')) {
-    subscription = await stripe(env, 'subscriptions/' + id(object?.id, 'sub'));
+    subscription = await api(env, 'subscriptions/' + id(object?.id, 'sub'));
   } else if (event.type.startsWith('invoice.')) {
-    invoice = await stripe(env, 'invoices/' + id(object?.id, 'in'));
-    subscription = await stripe(env, 'subscriptions/' + id(invoice.subscription, 'sub'));
+    invoice = await api(env, 'invoices/' + id(object?.id, 'in'));
+    subscription = await api(env, 'subscriptions/' + id(invoice.subscription, 'sub'));
   } else {
     if (event.type.startsWith('charge.dispute.')) {
-      const dispute = await stripe(env, 'disputes/' + id(object?.id, 'dp'));
-      charge = await stripe(env, 'charges/' + id(dispute.charge, 'ch'));
-    } else charge = await stripe(env, 'charges/' + id(object?.id, 'ch'));
-    invoice = await stripe(env, 'invoices/' + id(charge.invoice, 'in'));
-    subscription = await stripe(env, 'subscriptions/' + id(invoice.subscription, 'sub'));
+      const dispute = await api(env, 'disputes/' + id(object?.id, 'dp'));
+      charge = await api(env, 'charges/' + id(dispute.charge, 'ch'));
+    } else charge = await api(env, 'charges/' + id(object?.id, 'ch'));
+    invoice = await api(env, 'invoices/' + id(charge.invoice, 'in'));
+    subscription = await api(env, 'subscriptions/' + id(invoice.subscription, 'sub'));
   }
   const user = subscription.metadata?.nekuma_user;
-  if (!String(env.STRIPE_TEST_USERS || '').split(',').map(v=>v.trim()).includes(user)) return { ignored: true };
-  const binding = await database(env, 'stripe_test_lookup_subscription', { target_user: user, target_subscription: subscription.id });
+  if (!live && !String(env.STRIPE_TEST_USERS || '').split(',').map(v=>v.trim()).includes(user)) return { ignored: true };
+  if (live && !/^[a-f0-9-]{36}$/i.test(user || '')) return { ignored: true };
+  const binding = await database(env, live ? 'stripe_live_lookup' : 'stripe_test_lookup_subscription', { target_user: user, target_subscription: subscription.id });
   if (!binding?.session_id) fail(503, 'Vinculo Stripe ainda nao disponivel.');
-  session ||= await stripe(env, 'checkout/sessions/' + id(binding.session_id, 'cs'));
-  validateSession(session, { id: user });
+  session ||= await api(env, 'checkout/sessions/' + id(binding.session_id, 'cs'));
+  validate(session, { id: user });
   if (session.id !== binding.session_id || id(session.subscription,'sub') !== subscription.id
     || subscription.metadata?.nekuma_plan !== 'pro' || subscription.customer !== session.customer
     || (binding.customer_id && binding.customer_id !== session.customer)
     || (binding.subscription_id && binding.subscription_id !== subscription.id)) fail(400, 'Vinculo da assinatura divergente.');
   const effect = { action: 'state' };
-  const now = await clockTime(env, binding, subscription);
+  if (live && (subscription.test_clock || session.test_clock)) fail(400, 'Relogio de teste proibido em LIVE.');
+  const now = live ? Date.now() : await clockTime(env, binding, subscription);
   if (event.type === 'invoice.paid') {
-    charge ||= await stripe(env, 'charges/' + id(invoice.charge, 'ch'));
+    charge ||= await api(env, 'charges/' + id(invoice.charge, 'ch'));
     const line = invoice.lines?.data?.[0];
     const price = line?.price;
     const from = line?.period?.start, until = line?.period?.end;
@@ -93,6 +98,7 @@ export async function processStripeTestEvent(env, incoming) {
       || !['subscription_create','subscription_cycle'].includes(invoice.billing_reason)
       || invoice.lines?.has_more || invoice.lines?.data?.length !== 1 || line.quantity !== 1 || line.proration
       || price?.currency !== 'jpy' || price.unit_amount !== 480 || price.recurring?.interval !== 'month' || price.recurring.interval_count !== 1
+      || (live && price.id !== env.STRIPE_LIVE_PRO_PRICE_ID)
       || !Number.isInteger(from) || !Number.isInteger(until) || until <= from || until-from > 32*86400 || from*1000 > now+300000
       || charge.status !== 'succeeded' || !charge.paid || charge.amount !== 480 || charge.currency !== 'jpy'
       || id(charge.invoice,'in') !== invoice.id || charge.customer !== session.customer) fail(400, 'Pagamento Stripe divergente.');
@@ -106,7 +112,7 @@ export async function processStripeTestEvent(env, incoming) {
     // Dispute closure never clears a refund hold; all resolutions require review.
     Object.assign(effect, { action: 'hold', charge: charge.id, reason: event.type === 'charge.refunded' ? 'refund' : 'dispute' });
   }
-  await database(env, 'stripe_test_record', { target_checkout: binding.id, target_event: event.id,
+  await database(env, live ? 'stripe_live_record' : 'stripe_test_record', { target_checkout: binding.id, target_event: event.id,
     target_kind: event.type, target_subscription: subscription.id, effect });
   return { received: true };
 }

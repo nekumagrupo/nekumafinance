@@ -1,0 +1,43 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const { PGlite } = require('../tmp/commercial-qa/node_modules/@electric-sql/pglite');
+(async () => {
+  const db = new PGlite();
+  const user = '569ccf01-6360-479e-8117-28dcdfba2335';
+  try {
+    await db.exec(`create role anon; create role authenticated; create role service_role;
+      create schema auth; create table auth.users(id uuid primary key);
+      create function auth.role() returns text language sql as $$ select current_setting('request.jwt.claim.role',true) $$;
+      create table public.commercial_access_overrides(user_id uuid,plan text,valid_until timestamptz);
+      create table public.commercial_notifications(user_id uuid,plan text);
+      create function public.commercial_effective_plan(uuid) returns text language sql as $$ select 'free'::text $$;
+      insert into auth.users values('${user}');`);
+    await db.exec(fs.readFileSync('outputs/finance-pwa/supabase-stripe-live-v18.sql','utf8'));
+    await db.exec(fs.readFileSync('outputs/finance-pwa/supabase-stripe-live-lifecycle-v19.sql','utf8'));
+    await assert.rejects(db.query('select stripe_live_reserve($1)',[user]), /FORBIDDEN/);
+    await db.exec("set request.jwt.claim.role='service_role'");
+    await assert.rejects(db.query('select stripe_live_reserve($1)',[user]), /LIVE_DISABLED/);
+    await db.exec('update stripe_live_settings set enabled=true');
+    const reserve = async () => (await db.query('select stripe_live_reserve($1) as v',[user])).rows[0].v;
+    const first = await reserve(); assert.equal((await reserve()).id, first.id);
+    await assert.rejects(db.query('select stripe_live_bind($1,$2)',[first.id,'cs_test_bad']), /INVALID_SESSION/);
+    await db.query('select stripe_live_bind($1,$2)',[first.id,'cs_live_fixture']);
+    const effect = { action:'paid',invoice:'in_fixture',charge:'ch_fixture',from:new Date(Date.now()-1000).toISOString(),until:new Date(Date.now()+86400000).toISOString() };
+    const record = (event, value) => db.query('select stripe_live_record($1,$2,$3,$4,$5::jsonb) as v',[first.id,event,'invoice.paid','sub_fixture',JSON.stringify(value)]);
+    await record('evt_paid',effect);
+    assert.equal((await db.query('select commercial_effective_plan($1) as v',[user])).rows[0].v,'pro');
+    assert.equal((await record('evt_paid',effect)).rows[0].v,false);
+    await record('evt_cancel',{action:'state'});
+    assert.equal((await db.query('select stripe_live_finish($1,$2,$3) as v',[first.id,'sub_fixture','canceled'])).rows[0].v,false);
+    assert.equal((await db.query('select commercial_effective_plan($1) as v',[user])).rows[0].v,'pro');
+    await record('evt_refund',{action:'hold',charge:'ch_fixture',reason:'refund'});
+    await record('evt_reordered',effect);
+    assert.equal((await db.query('select commercial_effective_plan($1) as v',[user])).rows[0].v,'free');
+    await assert.rejects(db.query('select stripe_live_finish($1,$2,$3)',[first.id,'sub_fixture','active']),/NOT_TERMINAL/);
+    assert.equal((await db.query('select stripe_live_finish($1,$2,$3) as v',[first.id,'sub_fixture','canceled'])).rows[0].v,true);
+    assert.notEqual((await reserve()).id,first.id);
+    assert.equal((await db.query("select has_table_privilege('authenticated','stripe_live_periods','SELECT') as v")).rows[0].v,false);
+    assert.equal((await db.query("select has_function_privilege('authenticated','stripe_live_record(uuid,text,text,text,jsonb)','EXECUTE') as v")).rows[0].v,false);
+    console.log('PASS: private LIVE ledger, activation gate, one reservation, live session binding, paid PRO, replay protection, renewal cancellation preserves access, refund survives reordered payment. Disposable PostgreSQL.');
+  } finally { await db.close(); }
+})().catch(error => { console.error(error); process.exitCode=1; });

@@ -12,6 +12,8 @@
   const PRIMARY_CURRENCY = "JPY";
   const DEFAULT_SECONDARY_CURRENCY = "BRL";
   const urlParams = new URLSearchParams(window.location.search);
+  const incomingReferral = String(urlParams.get("ref") || "").toUpperCase();
+  if (/^[A-F0-9]{32}$/.test(incomingReferral)) sessionStorage.setItem("nekuma-referral-invite", incomingReferral);
   const i18n = window.NekumaI18n || null;
   const supportedCurrencies = {
     JPY: { label: "JPY - Ienes", locale: "ja-JP", fraction: 0 },
@@ -440,6 +442,10 @@
   let paypalSandboxLoading = false;
   let stripeTestSnapshot = null;
   let stripeTestBusy = false;
+  let stripeLiveSnapshot = null;
+  let stripeLiveBusy = false;
+  let referralSnapshot = null;
+  let referralBusy = false;
   let remoteSaveQueue = Promise.resolve();
   let resetInProgress = false;
   let stateGeneration = 0;
@@ -504,6 +510,9 @@
     if (action === "paypal-sandbox-checkout") { startPaypalSandboxCheckout(event.target.closest("[data-plan]")?.dataset.plan); return; }
     if (action === "paypal-sandbox-status") { loadPaypalSandboxStatus(); return; }
     if (action === "stripe-test-status") { stripeTestRequest(false); return; }
+    if (action === "stripe-live-status") { stripeLiveRequest(false); return; }
+    if (action === "stripe-live-checkout") { stripeLiveRequest(true); return; }
+    if (action === "stripe-live-cancel") { stripeLiveCancel(); return; }
     if (action === "stripe-test-checkout") { stripeTestRequest(true); return; }
     if (action === "stripe-test-clock") { stripeTestRequest(true, true); return; }
     if (action === "set-auth-view") {
@@ -546,6 +555,7 @@
       saveState();
       if (button.closest(".modal-mobileMenu")) closeModal();
       render();
+      if (button.dataset.tab === "referrals") refreshReferralProgram();
     }
 
     if (action === "prototype-feature") {
@@ -723,6 +733,8 @@
     if (action === "copy-invite-code") copyInviteCode();
     if (action === "copy-referral-code") copyReferralCode();
     if (action === "share-referral") shareReferral();
+    if (action === "refresh-referrals") refreshReferralProgram();
+    if (action === "redeem-referrals") refreshReferralProgram(true);
     if (action === "select-commercial-plan") selectCommercialPlan(button.dataset.plan);
     if (action === "update-family-role") updateFamilyMemberRole(button.dataset.userId, button.dataset.role);
     if (action === "request-account-delete") showAccountDeleteInfo();
@@ -1403,6 +1415,7 @@
     await loadRemoteHouseholdMembers(household.id);
     await loadCommercialAccess();
     if (remoteSession.commercialAccess?.blocked) throw new Error("Conta bloqueada. Entre em contato com o suporte.");
+    await captureReferralAttribution();
 
     const { data, error } = await remoteStore.client
       .from("app_states")
@@ -5069,23 +5082,92 @@
   }
 
   function renderReferralPage() {
-    const code = referralCode();
-    const referrals = state.commercial.referrals || [];
+    const snapshot = referralSnapshot?.userId === remoteSession.user?.id ? referralSnapshot : null;
+    const active = snapshot?.enabled === true;
+    const points = active ? number(snapshot.points) : 0;
+    const referrals = active && Array.isArray(snapshot.history) ? snapshot.history : [];
+    const code = active ? String(snapshot.code || "") : "";
     return `
       <div class="detail-page-shell commercial-page">
-        ${renderPageIntro("Indique e ganhe", "Cresca com a sua comunidade", "Compartilhe o Nekuma com pessoas de confianca e acompanhe cada convite em um unico lugar.")}
+        ${renderPageIntro("Indique e ganhe", "3 indicacoes validas, 30 dias de PRO", "Cada primeiro pagamento PRO elegivel vale 100 pontos. Com 300 pontos, voce pode resgatar 30 dias de PRO.", `<button class="secondary-button" type="button" data-action="refresh-referrals" ${referralBusy ? "disabled" : ""}><i data-lucide="refresh-cw" aria-hidden="true"></i>Atualizar</button>`)}
+        ${!active ? `<p class="referral-program-status" role="status">${referralBusy ? "Consultando o programa..." : snapshot?.error ? escapeHtml(snapshot.error) : "Programa em preparacao. Pontos e recompensas ainda nao estao ativos."}</p>` : ""}
         <section class="referral-hero-card">
-          <div><p class="mini-label">Seu codigo pessoal</p><strong>${escapeHtml(code)}</strong><p>O codigo identifica as indicacoes sem expor seus dados financeiros.</p></div>
-          <div class="referral-actions"><button class="secondary-button" type="button" data-action="copy-referral-code"><i data-lucide="copy"></i>Copiar codigo</button><button class="primary-button" type="button" data-action="share-referral"><i data-lucide="share-2"></i>Compartilhar</button></div>
+          <div><p class="mini-label">Seu link pessoal</p><strong>${active ? escapeHtml(code) : "Disponivel na ativacao"}</strong><p>O vinculo e os pontos sao confirmados no servidor.</p></div>
+          <div class="referral-actions"><button class="secondary-button" type="button" data-action="copy-referral-code" ${!active ? "disabled" : ""}><i data-lucide="copy" aria-hidden="true"></i>Copiar link</button><button class="primary-button" type="button" data-action="share-referral" ${!active ? "disabled" : ""}><i data-lucide="share-2" aria-hidden="true"></i>Compartilhar</button></div>
         </section>
-        <section class="detail-kpi-grid"><article><span>Convites enviados</span><strong>${referrals.length}</strong><small>registrados</small></article><article><span>Contas ativadas</span><strong>${referrals.filter((item) => item.status === "active").length}</strong><small>indicacoes validas</small></article><article><span>Creditos</span><strong>${number(state.commercial.referralCredits)}</strong><small>saldo promocional</small></article><article><span>Seu plano</span><strong>${commercialPlanLabel(state.commercial.plan)}</strong><small>beneficios atuais</small></article></section>
-        <section class="detail-two-column"><article class="content-panel"><div class="panel-head"><div><h2>Como funciona</h2><p class="row-meta">Um fluxo transparente para voce e para quem recebe.</p></div></div><div class="commercial-step-list"><div><b>1</b><span><strong>Compartilhe</strong><small>Envie seu codigo ou link pessoal.</small></span></div><div><b>2</b><span><strong>A pessoa cria a conta</strong><small>A indicacao fica vinculada ao cadastro.</small></span></div><div><b>3</b><span><strong>Beneficio liberado</strong><small>A recompensa aparece quando a conta se torna elegivel.</small></span></div></div></article><article class="content-panel"><div class="panel-head"><div><h2>Historico de indicacoes</h2><p class="row-meta">Convites e ativacoes aparecerao aqui.</p></div></div>${referrals.length ? `<div class="list">${referrals.map((item) => `<div class="list-row compact"><div><p class="row-title">${escapeHtml(item.name || item.email || "Indicacao")}</p><p class="row-meta">${escapeHtml(item.createdAt ? formatShortDate(item.createdAt) : "Convite enviado")}</p></div><span class="chip ${item.status === "active" ? "green" : "gold"}">${item.status === "active" ? "Ativa" : "Pendente"}</span></div>`).join("")}</div>` : `<p class="empty-state">Nenhuma indicacao registrada ainda.</p>`}</article></section>
+        <section class="detail-kpi-grid"><article><span>Em validacao</span><strong>${active ? number(snapshot.pending) : "--"}</strong><small>aguardando elegibilidade</small></article><article><span>Aprovadas</span><strong>${active ? number(snapshot.approved) : "--"}</strong><small>primeiras mensalidades</small></article><article><span>Pontos disponiveis</span><strong>${active ? points : "--"}</strong><small>300 pontos = 30 dias de PRO</small></article><article><span>Seu plano</span><strong>${commercialPlanLabel(state.commercial.plan)}</strong><small>confirmado pelo servidor</small></article></section>
+        <section class="referral-reward"><div><h2>Seu proximo PRO</h2><progress max="300" value="${Math.min(300,points)}" aria-label="Pontos para resgatar PRO"></progress><p>${active ? `${Math.min(points,300)} / 300 pontos` : "Aguardando ativacao do programa"}</p></div><button class="primary-button" type="button" data-action="redeem-referrals" ${!active || points < 300 || referralBusy || commercialSnapshot()?.plan !== "free" ? "disabled" : ""}><i data-lucide="gift" aria-hidden="true"></i>Resgatar 30 dias</button></section>
+        <section class="detail-two-column"><article class="content-panel"><h2>Regras do programa</h2><ul class="referral-rules"><li>Somente contas novas vinculadas nas primeiras 24 horas.</li><li>Cadastro e teste gratis nao pontuam.</li><li>100 pontos pelo primeiro pagamento real PRO de cada pessoa, apos 14 dias e nova confirmacao no provedor.</li><li>Reembolso ou contestacao invalida os pontos e pode revogar a recompensa associada.</li><li>Sem autoindicacao, transferencia de pontos ou saque em dinheiro.</li><li>Inicialmente, o resgate fica disponivel apenas no Gratis. Assinantes nao devem acumular cobranca e recompensa.</li></ul></article><article class="content-panel"><h2>Historico de indicacoes</h2>${referrals.length ? `<div class="list">${referrals.map((item,index) => `<div class="list-row compact"><div><p class="row-title">Indicacao ${index+1}</p><p class="row-meta">${escapeHtml(formatShortDate(item.createdAt))}</p></div><span class="chip">${escapeHtml(({registered:"Cadastro vinculado",pending:"Em validacao",approved:"Aprovada",reversed:"Invalidada"})[item.status] || "Em analise")}</span></div>`).join("")}</div>` : `<p class="empty-state">Nenhuma indicacao confirmada pelo servidor.</p>`}</article></section>
       </div>
     `;
   }
 
   function renderPlansPage() {
     return renderVerifiedPlansPage();
+  }
+
+  async function stripeLiveRequest(checkout) {
+    if (stripeLiveBusy || !remoteSession.user?.id) return;
+    if (checkout && !window.confirm("Assinatura PRO: JPY 480 por mes, com renovacao automatica. Este pagamento e REAL. Continuar para o checkout seguro da Stripe?")) return;
+    const userId = remoteSession.user.id;
+    stripeLiveBusy = true;
+    render();
+    try {
+      const token = await currentSupabaseAccessToken();
+      const response = await fetch(checkout ? "/api/stripe/live-checkout" : "/api/stripe/live-status", {
+        method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(checkout ? { plan: "pro" } : {})
+      });
+      if (!(response.headers.get("Content-Type") || "").includes("application/json")) throw new Error("Pagamento temporariamente indisponivel.");
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Stripe indisponivel.");
+      if (remoteSession.user?.id !== userId) return;
+      if (data.environment !== "live") throw new Error("Ambiente de pagamento divergente.");
+      if (checkout) {
+        const url = new URL(data.approvalUrl);
+        if (url.origin !== "https://checkout.stripe.com" || url.username || url.password) throw new Error("Destino invalido.");
+        window.location.assign(url.href);
+      } else {
+        stripeLiveSnapshot = { ...data, userId };
+        await loadCommercialAccess();
+      }
+    } catch (error) {
+      if (remoteSession.user?.id === userId) stripeLiveSnapshot = { userId, error: error.message || "Pagamento indisponivel." };
+    } finally { stripeLiveBusy = false; render(); }
+  }
+
+  async function stripeLiveCancel() {
+    if (stripeLiveBusy || !remoteSession.user?.id) return;
+    if (!window.confirm("Desativar a renovacao automatica do PRO? O periodo ja pago sera preservado. Isso nao solicita reembolso.")) return;
+    const userId = remoteSession.user.id;
+    stripeLiveBusy = true;
+    render();
+    try {
+      const token = await currentSupabaseAccessToken();
+      const response = await fetch("/api/stripe/live-cancel", { method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }, body: JSON.stringify({ cancelRenewal: true, attempt: crypto.randomUUID() }) });
+      if (!(response.headers.get("Content-Type") || "").includes("application/json")) throw new Error("Cancelamento temporariamente indisponivel.");
+      const data = await response.json();
+      if (!response.ok || data.environment !== "live" || data.renewalCancelled !== true) throw new Error(data.error || "Cancelamento nao confirmado.");
+      if (remoteSession.user?.id === userId) {
+        stripeLiveSnapshot = { ...stripeLiveSnapshot, userId, renewalCancelled: true };
+        showToast("Renovacao desativada. Seu periodo pago foi preservado.");
+      }
+    } catch (error) { if (remoteSession.user?.id === userId) showToast(error.message || "Cancelamento indisponivel."); }
+    finally { stripeLiveBusy = false; render(); }
+  }
+
+  function renderStripeLivePanel() {
+    const snapshot = stripeLiveSnapshot?.userId === remoteSession.user?.id ? stripeLiveSnapshot : null;
+    return `<section class="content-panel"><div class="panel-head"><h2>Assinatura PRO</h2>
+      <button type="button" class="small-action" data-action="stripe-live-status" ${stripeLiveBusy ? "disabled" : ""}>Consultar pagamento</button></div>
+      <p>JPY 480/mes. Renovacao automatica. Familia em breve.</p>
+      <div role="status" aria-live="polite">${snapshot?.error ? `<p>${escapeHtml(snapshot.error)}</p>` : snapshot ? `<p>${snapshot.active ? "Periodo pago confirmado: PRO" : "Nenhum periodo pago ativo confirmado."}</p>` : ""}
+      ${snapshot?.paidUntil ? `<p>Periodo pago ate: ${escapeHtml(new Date(snapshot.paidUntil).toLocaleString())}</p>` : ""}
+      ${snapshot?.renewalCancelled ? "<p>Renovacao automatica desativada. O periodo pago permanece disponivel.</p>" : ""}</div>
+      ${snapshot?.available && !snapshot.hasSubscription ? `<button type="button" class="small-action" data-action="stripe-live-checkout" ${stripeLiveBusy ? "disabled" : ""}>Assinar PRO - JPY 480/mes</button>` : ""}
+      ${snapshot?.hasSubscription && !snapshot.renewalCancelled && ["active", "past_due", "trialing"].includes(snapshot.subscriptionStatus) ? `<button type="button" class="small-action" data-action="stripe-live-cancel" ${stripeLiveBusy ? "disabled" : ""}>Desativar renovacao automatica</button>` : ""}
+    </section>`;
   }
 
   async function stripeTestRequest(checkout, useClock = false) {
@@ -5173,6 +5255,7 @@
   }
 
   function renderPaypalSandboxStatus() {
+    if (remoteSession.user?.id !== "569ccf01-6360-479e-8117-28dcdfba2335") return "";
     const snapshot = paypalSandboxStatus?.userId === remoteSession.user?.id ? paypalSandboxStatus : null;
     const labels = { not_started: "Nenhum checkout iniciado", not_configured: "Configuracao de testes pendente", PENDING_BINDING: "Checkout em preparacao", APPROVAL_PENDING: "Aguardando aprovacao no PayPal", APPROVED: "Assinatura aprovada; aguardando pagamento", ACTIVE: "Assinatura ativa no PayPal", SUSPENDED: "Assinatura suspensa", CANCELLED: "Assinatura cancelada", EXPIRED: "Assinatura encerrada" };
     const resume = snapshot?.status === "APPROVAL_PENDING" && snapshot.plan === "pro"
@@ -5220,6 +5303,7 @@
   function renderVerifiedPlansPage() {
     const access = remoteSession.commercialAccess?.userId === remoteSession.user?.id ? remoteSession.commercialAccess : null;
     const current = access?.plan;
+    const liveReady = stripeLiveSnapshot?.userId === remoteSession.user?.id && stripeLiveSnapshot.available === true;
     const descriptions = {
       free: ["1 conta bancaria e 1 cartao", "1 fabrica ou fonte de renda", "Salario bruto previsto, antes dos descontos", "Comparativo mensal", "Cripto manual", "Organizacao fixa dos cards", "Exportacao dos seus dados"],
       pro: ["Varias contas, cartoes e empresas", "Salario detalhado e projecao de saldo", "Organizacao personalizada dos cards", "30 scans por mes", "Integracoes MetaMask e Binance", "Automacoes e patrimonio"],
@@ -5227,9 +5311,10 @@
     };
     const labels = { free: "Gratis", pro: "PRO", family: "Familia" };
     return `<div class="detail-page-shell commercial-page">
-      ${renderPageIntro("Planos Nekuma", "Seu plano e seus recursos", "Dados preservados em qualquer plano. Contratacao comercial ainda indisponivel.")}
+      ${renderPageIntro("Planos Nekuma", "Seu plano e seus recursos", liveReady ? "PRO por JPY 480/mes. Dados preservados em qualquer plano." : "Dados preservados em qualquer plano. Contratacao comercial em preparacao.")}
       ${renderPaypalSandboxStatus()}
       ${renderStripeTestPanel()}
+      ${renderStripeLivePanel()}
       <section class="content-panel"><h2>${access ? `Plano ${labels[current]}` : "Plano aguardando validacao"}</h2>
         <p class="row-meta">${access ? "Informacao consultada no servidor." : "A base comercial precisa estar disponivel no Supabase para confirmar seu acesso."}</p>
         ${access?.status === "trialing" && access.trialEndsAt ? `<p>Teste ate ${escapeHtml(new Date(access.trialEndsAt).toLocaleString())}</p>` : ""}
@@ -19284,9 +19369,39 @@
   }
 
   function referralCode() {
-    if (state.commercial.referralCode) return state.commercial.referralCode;
-    const seed = String(remoteSession.user?.id || remoteSession.household?.invite_code || state.settings.familyName || "NEKUMA").replace(/[^a-z0-9]/gi, "").toUpperCase();
-    return `NEK${seed.slice(0, 7).padEnd(7, "0")}`;
+    const code = referralSnapshot?.userId === remoteSession.user?.id && referralSnapshot.enabled ? referralSnapshot.code : "";
+    return /^[A-F0-9]{32}$/.test(code || "") ? code : "";
+  }
+
+  function referralLink() {
+    const code = referralCode();
+    return code ? `https://app.nekumafinance.app/app?auth=signup&ref=${encodeURIComponent(code)}` : "";
+  }
+
+  async function captureReferralAttribution() {
+    const code = sessionStorage.getItem("nekuma-referral-invite");
+    if (!code || !remoteStore.client || !remoteSession.user?.id) return;
+    try {
+      const { error } = await remoteStore.client.rpc("referral_claim", { invite_code: code });
+      if (!error) sessionStorage.removeItem("nekuma-referral-invite");
+    } catch { /* Referral availability must not block authentication. */ }
+  }
+
+  async function refreshReferralProgram(redeem = false) {
+    if (referralBusy || !remoteStore.client || !remoteSession.user?.id) return;
+    if (redeem && !window.confirm("Resgatar 300 pontos por 30 dias de PRO, sem cobranca automatica?")) return;
+    const userId = remoteSession.user.id;
+    referralBusy = true; renderKeepingScroll();
+    try {
+      const { data, error } = await remoteStore.client.rpc(redeem ? "redeem_referral_pro" : "my_referral_dashboard");
+      if (error) throw error;
+      if (remoteSession.user?.id !== userId) return;
+      referralSnapshot = { ...(data || {}), userId };
+      if (redeem) { await loadCommercialAccess(); showToast("PRO promocional liberado por 30 dias."); }
+    } catch (error) {
+      if (remoteSession.user?.id === userId) referralSnapshot = { userId, enabled: false,
+        error: redeem ? "Resgate nao concluido. Atualize os pontos; o servidor precisa revalidar os pagamentos e confirmar que nao existe um plano ativo." : "Programa em preparacao ou temporariamente indisponivel. Nenhum ponto local concede PRO." };
+    } finally { referralBusy = false; if (remoteSession.user?.id === userId) renderKeepingScroll(); }
   }
 
   function commercialPlanLabel(plan) {
@@ -19295,23 +19410,25 @@
   }
 
   async function copyReferralCode() {
-    const code = referralCode();
+    const code = referralLink();
+    if (!code) return showToast("O programa ainda nao esta ativo para esta conta.");
     try {
       await navigator.clipboard.writeText(code);
-      showToast("Codigo de indicacao copiado.");
+      showToast("Link de indicacao copiado.");
     } catch {
       showToast(`Seu codigo: ${code}`);
     }
   }
 
   async function shareReferral() {
-    const code = referralCode();
-    const text = `Conheca o Nekuma Finance. Use meu codigo de indicacao: ${code}`;
+    const code = referralLink();
+    if (!code) return showToast("O programa ainda nao esta ativo para esta conta.");
+    const text = "Conheca o Nekuma Finance e organize sua vida financeira.";
     if (navigator.share) {
-      try { await navigator.share({ title: "Nekuma Finance", text, url: window.location.origin }); } catch {}
+      try { await navigator.share({ title: "Nekuma Finance", text, url: code }); } catch {}
       return;
     }
-    try { await navigator.clipboard.writeText(`${text} ${window.location.origin}`); showToast("Convite copiado para compartilhar."); } catch { showToast(`Codigo: ${code}`); }
+    try { await navigator.clipboard.writeText(`${text} ${code}`); showToast("Convite copiado para compartilhar."); } catch { showToast(`Link: ${code}`); }
   }
 
   function selectCommercialPlan(plan) {
