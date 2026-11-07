@@ -5300,6 +5300,27 @@
     } catch { /* Commercial availability must not interrupt financial synchronization. */ }
   }
 
+  function renderPlansWiseCard() {
+    const copy = {
+      "pt-BR": ["Conta Wise", "Envie dinheiro do Japão para o Brasil e consulte o câmbio e as tarifas antes de confirmar a transferência.", "Conhecer a Wise", "Link de afiliado: o Nekuma pode receber comissão por indicações elegíveis."],
+      "en": ["Wise account", "Send money from Japan to Brazil and see the exchange rate and fees before confirming your transfer.", "Explore Wise", "Affiliate link: Nekuma may earn a commission on eligible referrals."],
+      "ja": ["Wiseアカウント", "日本からブラジルへ送金できます。手続きの確定前に為替レートと手数料を確認できます。", "Wiseについて", "広告リンク：対象となる紹介により、Nekumaが報酬を受け取る場合があります。"]
+    };
+    const language = activeLanguage();
+    const [title, description, action, disclosure] = copy[language.split("-")[0]] || copy["pt-BR"];
+    return `<section class="content-panel plans-wise" aria-labelledby="plans-wise-title">
+      <div class="plans-wise-copy">
+        <h2 id="plans-wise-title">${title}</h2>
+        <p>${description}</p>
+        <p id="plans-wise-disclosure" class="row-meta">${disclosure}</p>
+      </div>
+      <a class="plans-wise-link" href="https://wise.prf.hn/click/camref:1110lSIKz/destination:https%3A%2F%2Fwise.com%2Fjp%2Fsend-money%2F" target="_blank" rel="sponsored noopener" aria-describedby="plans-wise-disclosure">
+        <img src="https://wise-creative.prf.hn/source/camref:1110lSIKz/creativeref:1101l107663" width="1200" height="628" loading="lazy" decoding="async" alt="" />
+        <span>${action} <i data-lucide="arrow-up-right" aria-hidden="true"></i></span>
+      </a>
+    </section>`;
+  }
+
   function renderVerifiedPlansPage() {
     const access = remoteSession.commercialAccess?.userId === remoteSession.user?.id ? remoteSession.commercialAccess : null;
     const current = access?.plan;
@@ -5324,6 +5345,7 @@
         ${access?.limits?.scansMonthly ? `<p class="row-meta">Scans neste mes: ${number(access.scansUsed)}/${access.limits.scansMonthly}${current === "family" ? " compartilhados pela familia" : ""}. Renovacao mensal no horario do Japao. Cada envio valido para leitura consome um scan, mesmo se a imagem nao puder ser reconhecida.</p>` : ""}
       </section>
       <section class="plan-grid">${["free", "pro", "family"].map(key => `<article class="plan-card ${key === current ? "is-current" : ""}"><div class="plan-card-head"><h2>${labels[key]}</h2></div><div class="plan-price"><strong>${key === "free" ? "Gratis" : key === "pro" ? "¥480" : "¥850"}</strong><small>${key === "free" ? "" : "/mes"}</small></div><ul>${descriptions[key].map(text => `<li><i data-lucide="check"></i>${text}</li>`).join("")}</ul><span class="chip">${key === current ? "Plano atual" : "Contratacao em breve"}</span></article>`).join("")}</section>
+      ${renderPlansWiseCard()}
     </div>`;
   }
 

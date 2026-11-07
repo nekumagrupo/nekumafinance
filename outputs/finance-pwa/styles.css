@@ -10390,6 +10390,13 @@ h1 {
 .commercial-step-list small { color: var(--muted); font-size: .56rem; }
 
 .plan-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.plans-wise { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); align-items: center; gap: 16px 24px; }
+.plans-wise-copy { display: grid; gap: 8px; }
+.plans-wise-copy p { margin: 0; line-height: 1.5; }
+.plans-wise-link { display: grid; justify-self: start; gap: 8px; width: min(100%, 24rem); color: var(--ink); }
+.plans-wise-link img { display: block; width: 100%; height: auto; aspect-ratio: 1200 / 628; border-radius: 6px; }
+.plans-wise-link span { display: inline-flex; align-items: center; gap: 6px; text-decoration: underline; }
+.plans-wise-link svg { width: 16px; height: 16px; flex: none; }
 .plan-card { position: relative; display: grid; grid-template-rows: auto auto 1fr auto; gap: 14px; min-width: 0; padding: 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); }
 .plan-card.is-featured { border-color: var(--theme-secondary, var(--green)); box-shadow: inset 0 4px 0 var(--theme-secondary, var(--green)); }
 .plan-card.is-current { background: color-mix(in srgb, var(--theme-bg, var(--paper-2)), #fff 66%); }
