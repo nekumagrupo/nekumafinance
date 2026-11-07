@@ -113,6 +113,13 @@
 .wise-rate-copy > p:not(.eyebrow) { max-width: 530px; line-height: 1.8; }
 .wise-rate-copy .text-link { margin: 12px 0; }
 .wise-rate-disclaimer { color: var(--muted); font-size: 12px; line-height: 1.7; }
+.wise-rate-details { min-width: 0; }
+.wise-affiliate { margin-top: 24px; }
+.wise-affiliate > p { margin: 0 0 8px; }
+.wise-affiliate-link { display: block; border-radius: 6px; }
+.wise-affiliate-link img { display: block; width: 100%; height: auto; aspect-ratio: 1200 / 628; border-radius: 6px; }
+.wise-affiliate-link .text-link { margin-top: 10px; }
+.wise-affiliate-link:hover .text-link { text-decoration: underline; }
 .wise-rate-example { margin: 0; padding: 24px 0 0; border-top: 2px solid #16330055; min-width: 0; }
 .wise-rate-example figcaption { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; font-size: 12px; font-weight: 700; }
 .wise-rate-pair { display: grid; grid-template-columns: minmax(0, 1fr) 22px minmax(0, 1.2fr); gap: 16px; align-items: center; padding: 24px 0; }
