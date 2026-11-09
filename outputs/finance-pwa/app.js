@@ -458,7 +458,7 @@
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./service-worker.js?v=266")
+      navigator.serviceWorker.register("./service-worker.js?v=301")
         .then((registration) => registration.update().catch(() => {}))
         .catch(() => {});
     });
@@ -10394,10 +10394,11 @@
   }
 
   function renderQuickExpenseModal() {
-    const activeCountry = state.ui.activeCountry === "global"
+    const singleCountry = isSingleCurrencyPlan() ? quickExpenseSingleCountry() : "";
+    const activeCountry = singleCountry || (state.ui.activeCountry === "global"
       ? selectedDashboardAccount()?.country || (state.settings.operationCountry === "brasil" ? "brasil" : "japao")
-      : state.ui.activeCountry;
-    const currency = countryMeta[activeCountry].currency;
+      : state.ui.activeCountry);
+    const currency = singleCountry ? primaryCurrency() : countryMeta[activeCountry].currency;
     return `
       <div class="modal-head">
         <h2>Gasto rapido</h2>
@@ -10405,7 +10406,10 @@
       </div>
       <form class="form-grid" data-form="quick-expense">
         <div class="two-cols">
-          ${countrySelect(activeCountry)}
+          ${singleCountry ? `<div class="field">
+            <label for="country">Pais</label>
+            <select id="country" name="country"><option value="${singleCountry}">${state.settings.operationCountry === "other" ? "Outro pais" : countryMeta[singleCountry].label}</option></select>
+          </div>` : countrySelect(activeCountry)}
           <div class="field">
             <label for="quickExpenseCategory">Categoria</label>
             <input id="quickExpenseCategory" name="category" list="quickExpenseCategories" required placeholder="Ex: Supermercado" />
@@ -12598,6 +12602,10 @@
 
   function saveQuickExpense(form) {
     const data = formData(form);
+    if (isSingleCurrencyPlan() && data.country !== quickExpenseSingleCountry()) {
+      showToast("O plano Single permite gastos apenas no pais de operacao.");
+      return;
+    }
     if (data.bankAccountId && !quickExpenseBankAccount(data.country, data.bankAccountId)) {
       showToast("Selecione uma conta bancaria do pais do gasto.");
       return;
@@ -18428,13 +18436,22 @@
     if (methodLabel) methodLabel.textContent = type === "income" ? "Modo de recebimento" : "Forma de pagamento";
   }
 
+  function quickExpenseSingleCountry() {
+    const configured = state.settings.operationCountry;
+    if (configured === "brasil" || configured === "japao") return configured;
+    // Existing bank records use the Brazil/Japan keys even for other operating countries.
+    const account = selectedDashboardAccount();
+    return account ? (account.country === "brasil" ? "brasil" : "japao") : (primaryCurrency() === "BRL" ? "brasil" : "japao");
+  }
+
   function quickExpenseBankAccount(country, id) {
     return activeBankAccounts().find(account => account.id === id && account.country === country);
   }
 
   function updateQuickExpenseCountryFields(form) {
     const { country, currency, bankAccountId, paymentMethod } = form.elements;
-    const selectedCountry = country.value;
+    const selectedCountry = isSingleCurrencyPlan() ? quickExpenseSingleCountry() : country.value;
+    country.value = selectedCountry;
     const account = quickExpenseBankAccount(selectedCountry, bankAccountId.value);
     bankAccountId.innerHTML = bankAccountSelectOptions(selectedCountry, account?.id || "");
     bankAccountId.value = account?.id || "";

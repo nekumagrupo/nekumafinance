@@ -5,18 +5,23 @@ const vm = require("node:vm");
 const app = fs.readFileSync("outputs/finance-pwa/app.js", "utf8");
 const section = (start, end) => app.slice(app.indexOf(`  function ${start}(`), app.indexOf(`  function ${end}(`));
 const accounts = [{ id: "jp", country: "japao", bankName: "Yucho" }, { id: "br", country: "brasil", bankName: "Nubank" }];
-const state = { transactions: [], ui: {} };
+const state = { transactions: [], ui: { activeCountry: "brasil" }, settings: { operationCountry: "japao" } };
 const messages = [];
 let single = false;
-const { updateQuickExpenseCountryFields: update, saveQuickExpense: save } = vm.runInNewContext([
-  section("quickExpenseBankAccount", "normalizeVehicleInsurancePaymentType"),
+let primary = "JPY";
+let dashboardAccount = accounts[1];
+const { updateQuickExpenseCountryFields: update, saveQuickExpense: save, renderQuickExpenseModal: renderExpense } = vm.runInNewContext([
+  section("quickExpenseSingleCountry", "normalizeVehicleInsurancePaymentType"),
   section("bankAccountSelectOptions", "receiptMethodLabel"), section("saveQuickExpense", "saveFamilyMember"),
-  "({ updateQuickExpenseCountryFields, saveQuickExpense })"
+  section("countrySelect", "saveTransaction"), section("renderQuickExpenseModal", "renderFamilyMemberModal"),
+  "({ updateQuickExpenseCountryFields, saveQuickExpense, renderQuickExpenseModal })"
 ].join("\n"), {
-  state, countryMeta: { japao: { currency: "JPY", short: "JP" }, brasil: { currency: "BRL", short: "BR" } },
+  state, countryMeta: { japao: { label: "Japao", currency: "JPY", short: "JP" }, brasil: { label: "Brasil", currency: "BRL", short: "BR" } },
   activeBankAccounts: () => accounts, bankAccountById: id => accounts.find(account => account.id === id),
+  selectedDashboardAccount: () => dashboardAccount, quickExpenseCategories: [], hasFamilyAccess: () => false,
+  currencyOptions: code => `<option value="${code}">${code}</option>`, dateInMonth: () => "2026-11-09", escapeAttr: value => value,
   bankAccountName: account => account.bankName, selectedAttr: (value, selected) => value === selected ? "selected" : "",
-  escapeHtml: value => value, primaryCurrency: () => "JPY", isSingleCurrencyPlan: () => single,
+  escapeHtml: value => value, primaryCurrency: () => primary, isSingleCurrencyPlan: () => single,
   formData: data => data, showToast: message => messages.push(message), currentUserAuthor: () => ({ id: "user" }),
   uid: () => "test", number: Number, applyAutomaticClassification: entry => entry, saveState: () => {}, closeModal: () => {}, render: () => {}
 });
@@ -32,15 +37,46 @@ assert.equal(elements.currency.value, "BRL");
 elements.bankAccountId.value = "br";
 update({ elements });
 assert.match(elements.bankAccountId.innerHTML, /value="br" selected/);
+const countryOptions = () => renderExpense().match(/<select id="country" name="country">([\s\S]*?)<\/select>/)[1];
+assert.match(countryOptions(), /value="brasil"/);
+assert.match(countryOptions(), /value="japao"/);
 single = true;
+assert.match(countryOptions(), /value="japao"/);
+assert.doesNotMatch(countryOptions(), /brasil/);
+assert.match(renderExpense(), /Yucho/);
+assert.doesNotMatch(renderExpense(), /Nubank/);
 update({ elements });
+assert.equal(elements.country.value, "japao");
+assert.equal(elements.bankAccountId.value, "");
+assert.doesNotMatch(elements.paymentMethod.innerHTML, /Pix/);
 assert.equal(elements.currency.value, "JPY");
 
 const expense = { country: "brasil", title: "Teste", category: "Roupas", amount: "150", currency: "BRL", date: "2026-11-09", paymentMethod: "pix" };
+save({ ...expense, currency: "JPY", bankAccountId: "" });
+assert.equal(state.transactions.length, 0);
+assert.match(messages.at(-1), /pais de operacao/);
+save({ ...expense, country: "japao", currency: "JPY", bankAccountId: "jp" });
+assert.equal(state.transactions.pop().bankAccountId, "jp");
+state.settings.operationCountry = "brasil";
+state.ui.activeCountry = "japao";
+primary = "BRL";
+assert.match(countryOptions(), /value="brasil"/);
+assert.doesNotMatch(countryOptions(), /japao/);
+assert.match(renderExpense(), /Nubank/);
+state.settings.operationCountry = "other";
+primary = "USD";
+dashboardAccount = accounts[0];
+assert.match(countryOptions(), /Outro pais/);
+assert.match(renderExpense(), /value="USD"/);
+state.settings.operationCountry = "";
+dashboardAccount = null;
+primary = "BRL";
+assert.match(countryOptions(), /value="brasil"/);
+single = false;
 save({ ...expense, bankAccountId: "jp" });
 assert.equal(state.transactions.length, 0);
 assert.match(messages.at(-1), /pais do gasto/);
 save({ ...expense, bankAccountId: "br" });
 assert.equal(state.transactions[0].bankAccountId, "br");
 assert.equal(state.transactions[0].currency, "BRL");
-console.log("PASS: Quick Expense refreshes accounts and payment methods by country, preserves Single currency, and rejects mismatched links.");
+console.log("PASS: Quick Expense locks Single to the operating country, rejects stale submissions, and preserves PRO country switching and account links.");
