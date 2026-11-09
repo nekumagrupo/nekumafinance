@@ -407,6 +407,7 @@
   let passwordRecoveryStep = isPasswordRecoveryLink ? "password" : "request";
   let passwordRecoveryEmail = "";
   let passwordRecoveryBusy = false;
+  let signupResult = "";
   const SOCIAL_AUTH_PENDING_KEY = "nekuma-social-auth-pending";
   let languageSetupRequired = false;
   let proTrialActivationBusy = false;
@@ -458,7 +459,7 @@
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./service-worker.js?v=302")
+      navigator.serviceWorker.register("./service-worker.js?v=303")
         .then((registration) => registration.update().catch(() => {}))
         .catch(() => {});
     });
@@ -810,7 +811,7 @@
     if (formType === "projection-scenario") saveProjectionScenario(form);
     if (formType === "categorization-rule") saveCategorizationRule(form);
     if (formType === "auth-login") signInRemote(form);
-    if (formType === "auth-signup") signUpRemote(form);
+    if (formType === "auth-signup") await signUpRemote(form);
     if (formType === "auth-recovery-request") requestPasswordReset(form);
     if (formType === "auth-recovery-code") verifyPasswordRecoveryCode(form);
     if (formType === "auth-reset") updatePasswordFromRecovery(form);
@@ -1198,15 +1199,24 @@
   }
 
   async function signUpRemote(form) {
+    if (form.getAttribute("aria-busy") === "true") return;
     const data = formData(form);
     const displayName = String(data.displayName || "").trim();
     if (!displayName || displayName.length > 100) return showToast("Informe seu nome.");
-    remoteSession.status = "loading";
+    const email = String(data.email || "").trim().toLowerCase();
+    const status = form.querySelector("[data-signup-status]");
+    const buttons = [...form.querySelectorAll("button:not(:disabled)")];
+    const feedback = (message, isError = false) => {
+      status.classList.toggle("auth-error", isError);
+      status.textContent = message;
+    };
+    form.setAttribute("aria-busy", "true");
+    buttons.forEach(button => { button.disabled = true; });
     remoteSession.error = "";
-    render();
+    feedback("Criando sua conta...");
     try {
       const { data: authData, error } = await remoteStore.client.auth.signUp({
-        email: data.email.trim().toLowerCase(),
+        email,
         password: data.password,
         options: {
           data: { display_name: displayName, name: displayName, nekuma_first_access: 1 }
@@ -1214,30 +1224,24 @@
       });
       if (error) throw error;
       if (!authData.session && Array.isArray(authData.user?.identities) && authData.user.identities.length === 0) {
-        remoteSession.status = "signedOut";
-        remoteSession.error = "Nao foi criado um novo cadastro. Tente entrar ou recuperar sua senha; se ainda nao confirmou seu email, confira sua caixa de entrada.";
-        render();
+        feedback("Nao foi criado um novo cadastro. Tente entrar ou recuperar sua senha. Se ainda nao confirmou seu email, confira sua caixa de entrada.", true);
         return;
       }
-      if (data.inviteCode) localStorage.setItem(`nekuma-pending-family:${data.email.trim().toLowerCase()}`, normalizeInviteCode(data.inviteCode));
-      if (!authData.session?.user) {
-        remoteSession.status = "signedOut";
-        render();
-        window.alert("Cadastro efetuado com sucesso. Confirme seu email e depois faça login.");
-        window.location.href = i18n?.publicUrl("./index.html") || "./index.html";
-        return;
+      if (data.inviteCode) {
+        try { localStorage.setItem(`nekuma-pending-family:${email}`, normalizeInviteCode(data.inviteCode)); }
+        catch { /* Account creation succeeded even when local storage is unavailable. */ }
       }
-
-      await remoteStore.client.auth.signOut().catch(() => {});
+      if (authData.session?.user) await remoteStore.client.auth.signOut({ scope: "local" }).catch(() => {});
+      signupResult = authData.session?.user ? "created" : "confirm";
       remoteSession.status = "signedOut";
       remoteSession.user = null;
       render();
-      window.alert("Cadastro efetuado com sucesso.");
-      window.location.href = i18n?.publicUrl("./index.html") || "./index.html";
+      document.getElementById("signup-result-title")?.focus();
     } catch (error) {
-      remoteSession.status = "signedOut";
-      remoteSession.error = error.message || "Nao foi possivel criar a conta.";
-      render();
+      feedback(error.message || "Nao foi possivel criar a conta.", true);
+    } finally {
+      form.removeAttribute("aria-busy");
+      buttons.forEach(button => { button.disabled = false; });
     }
   }
 
@@ -3619,6 +3623,11 @@
 
   function renderAuthSignupForm(canSignup) {
     if (!canSignup) return renderAuthWelcome(false);
+    if (signupResult) return `
+      <div class="auth-card-head"><h2 id="signup-result-title" tabindex="-1">Conta criada</h2></div>
+      <p class="auth-lead" role="status">${signupResult === "confirm" ? "Confirme seu email antes de entrar. Confira tambem a caixa de spam." : "Entre com seu email e a senha que acabou de criar."}</p>
+      <p class="auth-footer-link"><a href="./app.html?auth=login">Entrar no Nekuma</a></p>
+    `;
     return `
       <div class="auth-card-head">
         <div>
@@ -3647,6 +3656,7 @@
         ${renderGoogleAuthButton("signup")}
         <div class="auth-divider"><span>ou crie com email</span></div>
         <button class="primary-button" type="submit">Criar login</button>
+        <p class="auth-lead" data-signup-status role="status" aria-live="polite" aria-atomic="true"></p>
       </form>
       <p class="auth-footer-link">Já tem cadastro? <a href="./app.html?auth=login">Entrar</a></p>
     `;
