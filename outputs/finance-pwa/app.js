@@ -458,7 +458,7 @@
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./service-worker.js?v=301")
+      navigator.serviceWorker.register("./service-worker.js?v=302")
         .then((registration) => registration.update().catch(() => {}))
         .catch(() => {});
     });
@@ -798,7 +798,7 @@
     if (formType === "vehicle-maintenance") saveVehicleMaintenance(form);
     if (formType === "income-source") saveIncomeSource(form);
     if (formType === "work-income") saveWorkIncome(form);
-    if (formType === "quick-expense") saveQuickExpense(form);
+    if (formType === "quick-expense") await saveQuickExpense(form);
     if (formType === "family-member") saveFamilyMember(form);
     if (formType === "family-business") saveFamilyBusiness(form);
     if (formType === "business-record") saveBusinessRecord(form);
@@ -1564,6 +1564,7 @@
         // Loading an existing downgraded account is read-only. Pending local data
         // stays available for a later explicit save; never prune premium records.
         lastLocalChangeAt = Math.max(Date.now(), (Date.parse(remoteSession.lastSyncedAt || "") || 0) + 1);
+        if (state.ui.pendingQuickExpenseIds?.length) remoteSession.error = "Ha gastos neste aparelho aguardando sincronizacao. Tente novamente em Ajustes.";
         return;
       }
       try { await flushRemoteState(); }
@@ -1691,12 +1692,14 @@
     clearTimeout(remoteSaveTimer);
     remoteSaveTimer = null;
     remoteSession.saving = true;
+    const generation = stateGeneration;
     const now = new Date().toISOString();
 
     try {
       // A reset on another device must win over an older local snapshot.
       const current = await remoteStore.client.from("app_states").select("state,updated_at")
         .eq("household_id", remoteSession.householdId).maybeSingle();
+      if (generation !== stateGeneration) return;
       if (current.error) throw current.error;
       if (resetTime(current.data?.state) > resetTime(state)) {
         state = { ...normalizeState(current.data.state), ui: state.ui };
@@ -1706,7 +1709,8 @@
         renderKeepingScroll();
         return;
       }
-      const nextState = preserveRestrictedRecordFormats(current.data?.state, withCurrentWorkOwner({ ...state, settings: { ...state.settings, dataMode: "online" } }));
+      const { pendingQuickExpenseIds, ...ui } = state.ui;
+      const nextState = preserveRestrictedRecordFormats(current.data?.state, withCurrentWorkOwner({ ...state, ui, settings: { ...state.settings, dataMode: "online" } }));
       const { data, error } = await remoteStore.client.rpc("save_app_state", {
         target_household_id: remoteSession.householdId,
         app_state: nextState
@@ -1726,10 +1730,15 @@
           }, { onConflict: "household_id" });
         if (fallback.error) throw fallback.error;
         remoteSession.lastSyncedAt = now;
-        return;
+      } else {
+        remoteSession.lastSyncedAt = data || now;
       }
-
-      remoteSession.lastSyncedAt = data || now;
+      if (generation === stateGeneration && pendingQuickExpenseIds?.length) {
+        const sent = new Set(nextState.transactions.map(item => item.id));
+        const acknowledged = new Set(pendingQuickExpenseIds.filter(id => sent.has(id)));
+        state.ui.pendingQuickExpenseIds = (state.ui.pendingQuickExpenseIds || []).filter(id => !acknowledged.has(id));
+        persistLocalState();
+      }
     } catch (error) {
       if (/PLAN_LIMIT|PLAN_FEATURE|PLAN_CURRENCY|Plano Familia necessario/.test(error.message || "")) {
         lastLocalChangeAt = Math.max(Date.now(), (Date.parse(remoteSession.lastSyncedAt || "") || 0) + 1);
@@ -1854,7 +1863,8 @@
 
   function hasPendingLocalChanges() {
     const localSyncedAt = Date.parse(remoteSession.lastSyncedAt || "") || 0;
-    return Boolean(remoteStore.enabled && remoteSession.status === "ready" && lastLocalChangeAt && lastLocalChangeAt > localSyncedAt);
+    return Boolean(remoteStore.enabled && remoteSession.status === "ready" &&
+      (state.ui.pendingQuickExpenseIds?.length || lastLocalChangeAt > localSyncedAt));
   }
 
   async function pullRemoteStateIfNewer(reason = "auto") {
@@ -2767,13 +2777,23 @@
     const mergedWallet = mergeSavedWallets(remote.web3Wallet, local.web3Wallet);
     const walletChanged = JSON.stringify(mergedWallet) !== JSON.stringify(remote.web3Wallet);
     const next = { ...remote, ...merged.collections, cryptoAssets: crypto.items, deletedItems, ui: local.ui, web3Wallet: mergedWallet };
+    const pendingExpenses = restorePendingQuickExpenses(remote.transactions, local, deletedItems.transactions);
+    next.transactions = pendingExpenses.transactions;
+    next.ui = { ...local.ui, pendingQuickExpenseIds: pendingExpenses.ids };
     const pendingBank = pendingFirstAccessBank(remote, local, deletedItems, remoteSession.user);
     if (pendingBank) next.bankAccounts = [pendingBank];
     for (const [collection, deletions] of Object.entries(deletedItems)) {
       if (Array.isArray(next[collection])) next[collection] = next[collection].filter(item => !deletions[item.id] || itemSyncTime(item) > Date.parse(deletions[item.id]));
     }
     next.vehicle = next.vehicles[0] || createInitialState().vehicle;
-    return { state: next, changed: Boolean(pendingBank) || walletChanged || merged.changed || crypto.changed || cryptoAssetsWereNormalized(rawRemote.cryptoAssets, remote.cryptoAssets) };
+    return { state: next, changed: Boolean(pendingBank) || pendingExpenses.ids.length > 0 || walletChanged || merged.changed || crypto.changed || cryptoAssetsWereNormalized(rawRemote.cryptoAssets, remote.cryptoAssets) };
+  }
+
+  function restorePendingQuickExpenses(remote, local, deleted = {}) {
+    const pending = new Set(local.ui.pendingQuickExpenseIds || []);
+    const synced = new Set(remote.map(item => item.id));
+    const unsynced = local.transactions.filter(item => item.quickExpense && pending.has(item.id) && !synced.has(item.id) && !deleted[item.id]);
+    return { transactions: [...unsynced, ...remote], ids: unsynced.map(item => item.id) };
   }
 
   function pendingFirstAccessBank(remote, local, deletedItems, user) {
@@ -2851,6 +2871,7 @@
     lastLocalChangeAt = Date.now();
     refreshAchievementLedger();
     persistLocalState();
+    if (options.localOnly) return;
     if (options.remoteNow) {
       flushRemoteState().catch((error) => {
         remoteSession.error = error.message || "Falha ao sincronizar.";
@@ -12600,7 +12621,7 @@
     showToast(`${copies.length} orcamento${copies.length === 1 ? " copiado" : "s copiados"}.`);
   }
 
-  function saveQuickExpense(form) {
+  async function saveQuickExpense(form) {
     const data = formData(form);
     if (isSingleCurrencyPlan() && data.country !== quickExpenseSingleCountry()) {
       showToast("O plano Single permite gastos apenas no pais de operacao.");
@@ -12611,8 +12632,9 @@
       return;
     }
     const author = currentUserAuthor();
+    const id = uid("tx");
     state.transactions.unshift(applyAutomaticClassification({
-      id: uid("tx"),
+      id,
       date: data.date,
       country: data.country,
       type: "expense",
@@ -12632,10 +12654,32 @@
       createdByName: author.name
     }));
     state.ui.selectedMonth = data.date.slice(0, 7);
-    saveState();
+    const online = Boolean(remoteStore.enabled && remoteSession.user && remoteSession.householdId);
+    if (online) state.ui.pendingQuickExpenseIds = [...(state.ui.pendingQuickExpenseIds || []), id];
+    saveState({ localOnly: online });
     closeModal();
     render();
-    showToast("Gasto rapido salvo.");
+    if (!online) {
+      showToast("Gasto rapido salvo neste aparelho.");
+      return;
+    }
+    const generation = stateGeneration;
+    showToast("Sincronizando gasto...");
+    try {
+      await flushRemoteState();
+      if (generation !== stateGeneration) return;
+      if (!state.transactions.some(item => item.id === id)) {
+        showToast("O gasto nao foi salvo. Os dados da conta foram atualizados pela nuvem.");
+        return;
+      }
+      if (state.ui.pendingQuickExpenseIds?.includes(id)) throw new Error("Sincronizacao nao confirmada.");
+      showToast("Gasto rapido salvo na nuvem.");
+    } catch (error) {
+      if (generation !== stateGeneration) return;
+      remoteSession.error = error.message || "Falha ao sincronizar.";
+      renderKeepingScroll();
+      showToast("Gasto guardado neste aparelho. Sincronizacao pendente; tente novamente em Ajustes.");
+    }
   }
 
   function saveFamilyMember(form) {
