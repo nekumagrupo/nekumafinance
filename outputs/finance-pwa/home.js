@@ -64,13 +64,13 @@
   };
   Object.assign(translations['en-US'], supportCopy['en-US']);
   Object.assign(translations['ja-JP'], supportCopy['ja-JP']);
-  Object.assign(translations['en-US'], {navPlans:'Plans',pricingEyebrow:'A PLAN FOR EVERY STAGE.',pricingTitle:'Your money. Your pace. Your plan.',pricingDescription:'Start with the essentials, expand your planning or organize your family finances. Compare what is included.',pricingAvailability:'You can create a free account now. Paid subscriptions and the 3-day PRO trial are coming soon.',pricingPreservation:'Changed plans? Your records stay saved. Paid features become unavailable on Free without deleting your history.'});
-  Object.assign(translations['ja-JP'], {pricingEyebrow:'暮らしに合わせて選ぶプラン。',pricingTitle:'お金の管理を、あなたのペースで。',pricingDescription:'基本の管理から、将来の計画、家族の家計まで。各プランの内容をご確認ください。',pricingAvailability:'無料アカウントは今すぐ作成できます。有料プランとPROの3日間お試しは近日公開予定です。',pricingPreservation:'プランを変更しても記録は保存されます。無料プランでは有料機能が利用できなくなりますが、履歴は削除されません。'});
+  Object.assign(translations['en-US'], {navPlans:'Plans',pricingEyebrow:'A PLAN FOR EVERY STAGE.',pricingTitle:'Your money. Your pace. Your plan.',pricingDescription:'Start with the essentials, expand your planning or organize your family finances. Compare what is included.',pricingAvailability:'New accounts start on Single, with no monthly fee. After adding a bank account and an income source, you can activate 3 days (72 hours) of PRO. When the trial ends, you return to Single without an automatic charge. Paid PRO subscriptions are being prepared. Family is coming soon.',pricingPreservation:'When you return to Single, the app shows only records in your primary currency. Records in other currencies stay saved.'});
+  Object.assign(translations['ja-JP'], {pricingEyebrow:'暮らしに合わせて選ぶプラン。',pricingTitle:'お金の管理を、あなたのペースで。',pricingDescription:'基本の管理から、将来の計画、家族の家計まで。各プランの内容をご確認ください。',pricingAvailability:'新規アカウントは月額無料のSingleから始まります。銀行口座と収入源を登録すると、PROの3日間（72時間）体験を開始できます。終了後は自動課金なしでSingleに戻ります。PROの有料契約は準備中です。ファミリープランは近日公開予定です。',pricingPreservation:'Singleに戻ると、メイン通貨の記録だけが表示されます。他の通貨の記録は保存されます。'});
   const pricingCopy = {
     'pt-BR': {
-      names:['Grátis','PRO','Família'],month:'/mês',badges:['O essencial','Mais planejamento','Até 5 pessoas'],more:'Saiba mais',less:'Mostrar menos',
-      subtitles:['Para começar a organizar sua vida financeira.','Para entender o mês e planejar o que vem depois.','Tudo do PRO, com a família na mesma página.'],
-      ctas:['Criar conta grátis','Começar 3 dias de PRO','Em breve'],soon:'Em breve',freeNote:'Sem mensalidade',proNote:'3 dias de PRO ao criar sua conta',familyNote:'Um plano para até 5 pessoas no total',trialStatus:'Depois do teste, Grátis sem cobrança automática',
+      names:['Single','PRO','Família'],month:'/mês',badges:['O essencial','Mais planejamento','Até 5 pessoas'],more:'Saiba mais',less:'Mostrar menos',
+      subtitles:['Organize sua vida financeira em uma moeda.','Planeje o mês com a opção de comparar valores em uma segunda moeda.','Tudo do PRO, com a família na mesma página.'],
+      ctas:['Criar conta Single','Criar conta para testar o PRO','Em breve'],soon:'Em breve',freeNote:'Sem mensalidade',proNote:'3 dias de PRO após ativar em Planos',familyNote:'Um plano para até 5 pessoas no total',trialStatus:'Depois do teste, Single sem cobrança automática',
       highlights:[['1 conta bancária e 1 cartão','1 fábrica ou fonte de renda','Salário bruto previsto','Comparativo do mês e cripto manual','Calendários, moradia e veículo','Ordem fixa dos cards'],['Contas, cartões e empresas sem limite','Salário com descontos e líquido previsto','Metas, reserva e patrimônio','Orçamentos e projeção de saldo','30 scans de recibos por mês','Integrações cripto e cards personalizáveis'],['Todos os recursos do PRO','Titular + até 4 convidados','Raio-X e organização familiar','Moradia com responsáveis por conta','Negócios e controles da família','60 scans por mês, compartilhados']],
       title:'Compare cada recurso',resource:'Recurso',yes:'Incluído',no:'Não incluído',unlimited:'Sem limite',one:'1',gross:'Somente bruto',full:'Bruto, descontos e líquido',fixed:'Fixa',custom:'Personalizável',manual:'Manual',shared:'60 / mês compartilhados',thirty:'30 / mês',five:'Até 5 pessoas',self:'Individual',
       groups:['Sua rotina financeira','Planejamento e patrimônio','Cripto e produtividade','Vida em família'],
@@ -78,9 +78,9 @@
       footnote:'¹ Caixinhas disponíveis ao cadastrar uma conta Nubank. Os scans do Família são uma cota única para todos os membros, não por pessoa. Valores em ienes por mês. Nekuma organiza seus registros; não movimenta dinheiro nem executa pagamentos bancários.'
     },
     'en-US': {
-      names:['Free','PRO','Family'],month:'/month',badges:['The essentials','More planning','Up to 5 people'],more:'Learn more',less:'Show less',
-      subtitles:['Start organizing your financial life.','Understand this month and plan what comes next.','Everything in PRO, with your family on the same page.'],
-      ctas:['Create a free account','Start 3 days of PRO','Coming soon'],soon:'Coming soon',freeNote:'No monthly fee',proNote:'3 days of PRO when you sign up',familyNote:'One plan for up to 5 people in total',trialStatus:'After the trial, Free with no automatic charge',
+      names:['Single','PRO','Family'],month:'/month',badges:['The essentials','More planning','Up to 5 people'],more:'Learn more',less:'Show less',
+      subtitles:['Organize your finances in one currency.','Plan your month and optionally compare amounts in a second currency.','Everything in PRO, with your family on the same page.'],
+      ctas:['Create a Single account','Create an account to try PRO','Coming soon'],soon:'Coming soon',freeNote:'No monthly fee',proNote:'3 days of PRO after activation in Plans',familyNote:'One plan for up to 5 people in total',trialStatus:'After the trial, return to Single with no automatic charge',
       highlights:[['1 bank account and 1 card','1 factory or income source','Expected gross salary','Monthly comparison and manual crypto','Calendars, housing and vehicle','Fixed dashboard card order'],['Unlimited accounts, cards and employers','Salary deductions and expected net pay','Goals, emergency fund and assets','Budgets and cash flow projections','30 receipt scans per month','Crypto integrations and customizable cards'],['Everything in PRO','Owner + up to 4 invited members','Family overview and organization','Assigned household bill payers','Family businesses and controls','60 shared scans per month']],
       title:'Compare every feature',resource:'Feature',yes:'Included',no:'Not included',unlimited:'Unlimited',one:'1',gross:'Gross only',full:'Gross, deductions and net',fixed:'Fixed',custom:'Customizable',manual:'Manual',shared:'60 / month shared',thirty:'30 / month',five:'Up to 5 people',self:'Individual',
       groups:['Everyday finances','Planning and assets','Crypto and productivity','Family life'],
@@ -88,9 +88,9 @@
       footnote:'¹ Savings boxes require a registered Nubank account. Family scans are one shared allowance, not a per-person quota. Prices are in yen per month. Nekuma organizes your records; it does not move money or execute bank payments.'
     },
     'ja-JP': {
-      names:['無料','PRO','ファミリー'],month:'/月',badges:['基本の管理','もっと計画的に','最大5人'],more:'詳しく見る',less:'閉じる',
-      subtitles:['毎日の家計管理を始めるために。','今月の内訳を把握し、これからの計画へ。','PROの全機能に、家族での共有を。'],
-      ctas:['無料アカウントを作成','PROを3日間試す','近日公開'],soon:'近日公開',freeNote:'月額料金なし',proNote:'新規登録でPROを3日間利用',familyNote:'契約者を含む最大5人で利用',trialStatus:'終了後は無料プランへ。自動課金なし',
+      names:['Single','PRO','ファミリー'],month:'/月',badges:['基本の管理','もっと計画的に','最大5人'],more:'詳しく見る',less:'閉じる',
+      subtitles:['一つの通貨で家計を管理。','月の計画を立て、第2通貨での換算額も表示できます。','PROの全機能に、家族での共有を。'],
+      ctas:['Singleアカウントを作成','PRO体験用にアカウントを作成','近日公開'],soon:'近日公開',freeNote:'月額料金なし',proNote:'プラン画面で開始してからPROを3日間利用',familyNote:'契約者を含む最大5人で利用',trialStatus:'終了後はSingleへ。自動課金なし',
       highlights:[['銀行口座1件・カード1枚','工場または収入源1件','控除前の給与見込額','月別比較・手動の暗号資産管理','カレンダー・住居・車両管理','カードの並び順は固定'],['口座・カード・勤務先は無制限','控除と手取り見込額の内訳','目標・予備資金・資産管理','予算と残高シミュレーション','レシート読取は月30回','暗号資産連携・カードの並べ替え'],['PROのすべての機能','契約者＋招待メンバー最大4人','家族の家計の全体像','住居費の支払担当者を設定','家族の事業・管理機能','月60回の読取を家族で共有']],
       title:'機能を詳しく比較',resource:'機能',yes:'利用可能',no:'対象外',unlimited:'無制限',one:'1件',gross:'控除前のみ',full:'総支給・控除・手取り',fixed:'固定',custom:'並べ替え可能',manual:'手動',shared:'月60回を共有',thirty:'月30回',five:'最大5人',self:'個人',
       groups:['毎日の家計','計画と資産','暗号資産と便利な機能','家族の家計'],
@@ -98,8 +98,6 @@
       footnote:'¹ 貯蓄ボックスはNubank口座の登録が必要です。ファミリーの読取回数は家族全員で共有する上限です。料金は月額・日本円です。Nekumaは記録を整理するアプリで、送金や銀行の支払いは実行しません。'
     }
   };
-  translations['en-US'].pricingAvailability = 'New accounts automatically receive 3 days (72 hours) of PRO. Then continue on Free, with no automatic charge and no loss of records. Paid PRO subscriptions are being prepared. Family is coming soon.';
-  translations['ja-JP'].pricingAvailability = '新規登録でPROを自動的に3日間（72時間）利用できます。その後は無料プランに戻り、自動課金や記録の削除はありません。PROの有料契約は準備中です。ファミリープランは近日公開予定です。';
   // Rows follow the same plan rules as the app, including shared Family scan quotas.
   const pricingRows = [
     [0,'one','unlimited','unlimited'],[0,'one','unlimited','unlimited'],[0,'one','unlimited','unlimited'],[0,true,true,true],[0,false,true,true],

@@ -41,6 +41,28 @@ const {PGlite}=require(path.resolve(process.env.PGLITE_MODULE || 'tmp/commercial
     await db.exec(fs.readFileSync('scripts/provision-nekuma-admin.sql','utf8'));
     await db.exec(fs.readFileSync('scripts/provision-nekuma-admin.sql','utf8'));
     assert.equal((await db.query('select count(*)::integer as count from public.commercial_admins')).rows[0].count,1);
+    for (const migration of ['supabase-plan-layout-v11.sql', 'supabase-stripe-live-v18.sql', 'supabase-stripe-live-lifecycle-v19.sql']) {
+      await db.exec(fs.readFileSync(`outputs/finance-pwa/${migration}`,'utf8'));
+    }
+    for (const migration of ['supabase-pro-trial-opt-in-v20.sql', 'supabase-single-currency-v21.sql']) {
+      const sql=fs.readFileSync(`outputs/finance-pwa/${migration}`,'utf8');
+      await db.exec(sql);
+      await db.exec(sql);
+    }
+    await db.exec(fs.readFileSync('scripts/test-pro-trial-opt-in-staging.sql','utf8'));
+    await db.exec(fs.readFileSync('scripts/test-single-currency-staging.sql','utf8'));
+    assert.equal((await db.query('select count(*)::integer as count from auth.users')).rows[0].count,1);
+    assert.equal((await db.query('select trial_offer_available from public.commercial_subscriptions')).rows[0].trial_offer_available,false);
+    console.log('PASS: manual trial and Single currency enforcement in disposable PostgreSQL; legacy account unchanged.');
+    await db.exec(`begin;
+      insert into auth.users(id,email,email_confirmed_at) values('00000000-0000-4000-8000-000000000323','family-no-expiry@example.invalid',now());
+      insert into public.commercial_access_overrides(user_id,plan,valid_until,reason)
+        values('00000000-0000-4000-8000-000000000323','family','infinity','Disposable non-expiring Family test');
+      select set_config('request.jwt.claims','{"sub":"00000000-0000-4000-8000-000000000323","role":"authenticated"}',true);`);
+    const family = (await db.query(`select public.my_commercial_access()->>'plan' as plan, public.my_pro_trial_offer() as trial,
+      exists(select 1 from public.commercial_admins where user_id=auth.uid()) as is_admin`)).rows[0];
+    assert.deepEqual(family,{plan:'family',trial:false,is_admin:false});
+    await db.exec('rollback;');
     console.log('PASS: PostgreSQL migrations, repeat application, expired trials, admin/MFA denial, manual grants, stale edits, audit, recovery target and exact-email bootstrap. Disposable auth schema only; real Supabase Auth/email integration still needs staging.');
   }finally{await db.close();}
 })().catch(error=>{console.error(error);process.exitCode=1});

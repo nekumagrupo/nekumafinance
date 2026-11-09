@@ -21,6 +21,9 @@
     USD: { label: "USD - Dolar", locale: "en-US", fraction: 2 },
     EUR: { label: "EUR - Euro", locale: "de-DE", fraction: 2 }
   };
+  const operationCurrencies = { japao: "JPY", brasil: "BRL", other: "USD" };
+  const singleCurrencyCollections = ["bankAccounts", "incomeSources", "workIncomes", "transactions", "commitments", "creditCards", "cardPurchases", "subscriptions", "housingCards", "cryptoAssets", "vehicles", "vehicleMaintenance", "shoppingLists", "transfers"];
+  const firstAccessScreens = ["setup", "welcome", "bank", "income", "bank-saved", "income-saved", "medal", "trial-offer"];
   const outflowTypes = ["expense", "debt", "card", "consortium", "vehicle"];
   const allOutflowTypes = ["expense", "debt", "card", "consortium", "investment", "vehicle"];
   const countryMeta = {
@@ -406,6 +409,7 @@
   let passwordRecoveryBusy = false;
   const SOCIAL_AUTH_PENDING_KEY = "nekuma-social-auth-pending";
   let languageSetupRequired = false;
+  let proTrialActivationBusy = false;
   let languageChangeInProgress = false;
   let receiptScanImageData = "";
   let receiptScanResult = null;
@@ -507,6 +511,7 @@
     }
     if (action === "none") return;
     if (action === "view-plans") { closeModal(); state.ui.activeTab = "plans"; render(); return; }
+    if (action === "activate-pro-trial") { activateProTrial(button); return; }
     if (action === "paypal-sandbox-checkout") { startPaypalSandboxCheckout(event.target.closest("[data-plan]")?.dataset.plan); return; }
     if (action === "paypal-sandbox-status") { loadPaypalSandboxStatus(); return; }
     if (action === "stripe-test-status") { stripeTestRequest(false); return; }
@@ -751,13 +756,23 @@
     event.preventDefault();
 
     const formType = form.dataset.form;
+    if (formType === "secondary-currency-choice") {
+      saveSecondaryCurrencyChoice(form, event.submitter?.value === "skip");
+      return;
+    }
+    if (firstAccessScreens.some(stage => formType === `first-access-${stage}`)) {
+      try { await saveFirstAccess(form); }
+      catch (error) { remoteSession.error = error.message || "Nao foi possivel salvar a configuracao."; render(); }
+      return;
+    }
     if (remoteStore.enabled && remoteSession.user && (commercialFeatureForType(formType) || ["bank-account","income-source","goal","emergency-reserve","category-budget"].includes(formType))) {
       if (form.dataset.planChecking) return;
       form.dataset.planChecking = "true";
       try { await loadCommercialAccess(); } finally { delete form.dataset.planChecking; }
       if (commercialSnapshot()?.blocked) { render(); return; }
     }
-    if (!guardCommercialForm(formType, formData(form))) return;
+    const data = formData(form);
+    if (!guardCommercialForm(formType, data) || !guardSingleCurrencyForm(formType, data)) return;
     if (!hasHouseholdPermission("write") && !["auth-login", "auth-signup", "auth-recovery-request", "auth-recovery-code", "auth-reset", "join-family", "settings"].includes(formType)) {
       showToast("Seu perfil familiar possui acesso somente para visualizacao.");
       return;
@@ -853,7 +868,11 @@
     if (event.target.closest(".housing-form-row") && event.target.id.endsWith("PayerId")) updateHousingPayerAccount(event.target);
     if (event.target.closest(".housing-form-row") && event.target.id.endsWith("PaymentMethod")) updateHousingPaymentFields();
     if (event.target.id === "cardPaymentMethod") updateCreditCardPaymentFields();
+    if (event.target.id === "operationCountry") {
+      event.target.form.elements.currency.value = operationCurrencies[event.target.value] || "";
+    }
     if (event.target.id === "bankAccountCountry") updateBankAccountCountryFields();
+    if (event.target.name === "country" && event.target.form?.dataset.form === "quick-expense") updateQuickExpenseCountryFields(event.target.form);
     if (event.target.id === "country" && event.target.closest("[data-form='transaction']")) updateTransactionBankFields();
     if (event.target.id === "type" && event.target.closest("[data-form='transaction']")) updateTransactionBankFields();
     if (event.target.id === "subscriptionPaymentMethod") updateSubscriptionCardField();
@@ -938,7 +957,7 @@
   }
 
   function activeLanguage() {
-    if (remoteStore?.enabled && !["ready", "languageSetup"].includes(remoteSession?.status)) {
+    if (remoteStore?.enabled && !["ready", "languageSetup", ...firstAccessScreens].includes(remoteSession?.status)) {
       return i18n?.publicLanguage() || "pt-BR";
     }
     const profileLanguage = state?.profile?.language;
@@ -953,6 +972,109 @@
     state.profile.language = savedLanguage || publicLanguage;
     languageSetupRequired = metadata.app_language_confirmed !== true;
     document.documentElement.lang = state.profile.language;
+  }
+
+  function firstAccessStage() {
+    const user = remoteSession.user;
+    const metadata = user?.user_metadata;
+    if (metadata?.nekuma_first_access !== 1) return "";
+    const members = remoteSession.householdMembers;
+    if (remoteSession.membersError || members.length !== 1 || members[0].userId !== user.id || members[0].role !== "owner") return "";
+    if (metadata.nekuma_operation_configured !== true) return "setup";
+    if (metadata.nekuma_welcome_seen !== true) return "welcome";
+    if (state.settings.firstAccessFinished) return "";
+    if (!activeBankAccounts().length) return "bank";
+    return userIncomeSources().length ? "medal" : "income";
+  }
+
+  function authenticatedScreen() {
+    return firstAccessStage() || (languageSetupRequired ? "languageSetup" : "ready");
+  }
+
+  async function saveFirstAccess(form) {
+    const stage = firstAccessStage();
+    const screen = remoteSession.status;
+    if (languageChangeInProgress || form.dataset.form !== `first-access-${screen}`) return;
+    if (screen === "trial-offer") {
+      remoteSession.status = "ready";
+      state.ui.activeTab = "plans";
+      render();
+      return;
+    }
+    if (!stage) return;
+    if (screen === "bank-saved" || screen === "income-saved") {
+      remoteSession.status = authenticatedScreen();
+      render();
+      return;
+    }
+    if (screen !== stage) return;
+    if (stage === "medal") {
+      const userId = remoteSession.user.id;
+      const button = form.querySelector('button[type="submit"]');
+      button.disabled = true;
+      languageChangeInProgress = true;
+      state.settings.firstAccessFinished = true;
+      state.ui.activeTab = "dashboard";
+      try {
+        saveState();
+        await flushRemoteState();
+        if (remoteSession.user?.id === userId && remoteSession.status === "medal") await loadCommercialAccess();
+      } catch {
+        showToast("Progresso salvo neste aparelho. A sincronizacao sera retomada quando houver conexao.");
+      } finally {
+        languageChangeInProgress = false;
+        if (remoteSession.user?.id === userId && remoteSession.status === "medal") {
+          remoteSession.status = commercialSnapshot()?.trialAvailable === true ? "trial-offer" : "ready";
+          render();
+        }
+      }
+      return;
+    }
+    const userId = remoteSession.user.id;
+    const input = formData(form);
+    languageChangeInProgress = true;
+    const button = form.querySelector('button[type="submit"]');
+    button.disabled = true;
+    remoteSession.error = "";
+    try {
+      if (stage === "bank" || stage === "income") {
+        openFirstAccessForm(stage);
+        return;
+      }
+      let metadata = { nekuma_welcome_seen: true };
+      if (stage === "setup") {
+        if (!["pt-BR", "en-US", "ja-JP"].includes(input.language) || !Object.hasOwn(operationCurrencies, input.country) || !Object.values(operationCurrencies).includes(input.currency)) {
+          throw new Error("Confira o idioma, o pais e a moeda.");
+        }
+        state.profile.language = input.language;
+        state.settings.operationCountry = input.country;
+        state.settings.baseCurrency = input.currency;
+        state.settings.secondaryCurrency = sanitizeSecondaryCurrency(state.settings.secondaryCurrency, input.currency);
+        persistLocalState();
+        await flushRemoteState();
+        metadata = { app_language: input.language, app_language_confirmed: true, nekuma_operation_configured: true };
+      }
+      if (remoteSession.user?.id !== userId) return;
+      const { data, error } = await remoteStore.client.auth.updateUser({ data: metadata });
+      if (error) throw error;
+      if (remoteSession.user?.id !== userId) return;
+      remoteSession.user = data.user;
+      prepareAuthenticatedLanguage();
+      i18n?.setPublicLanguage(state.profile.language);
+      remoteSession.status = authenticatedScreen();
+      render();
+    } finally {
+      languageChangeInProgress = false;
+      button.disabled = false;
+    }
+  }
+
+  function openFirstAccessForm(stage) {
+    remoteSession.status = "ready";
+    state.ui.activeTab = "accounts";
+    render();
+    openModal(stage === "bank" ? "bankAccount" : "incomeSource");
+    modalRoot.querySelector(`form[data-form="${stage === "bank" ? "bank-account" : "income-source"}"]`)?.setAttribute("data-first-access", stage);
   }
 
   async function confirmAppLanguage(locale) {
@@ -1036,7 +1158,7 @@
       clearPendingSocialAuth();
       clearAuthCallbackParams();
       prepareAuthenticatedLanguage(remoteSession.user);
-      remoteSession.status = languageSetupRequired ? "languageSetup" : "ready";
+      remoteSession.status = authenticatedScreen();
       startRemoteAutoSync();
       renderKeepingScroll();
       restoreSavedScrollPosition();
@@ -1064,7 +1186,7 @@
       if (inviteCode) await joinPendingFamily(inviteCode);
       else await loadRemoteState(remoteSession.user?.user_metadata?.family_name);
       prepareAuthenticatedLanguage(authData.user);
-      remoteSession.status = languageSetupRequired ? "languageSetup" : "ready";
+      remoteSession.status = authenticatedScreen();
       startRemoteAutoSync();
       render();
       showToast(remoteSession.error || (inviteCode ? "Familia conectada." : "Login realizado."));
@@ -1087,7 +1209,7 @@
         email: data.email.trim().toLowerCase(),
         password: data.password,
         options: {
-          data: { display_name: displayName, name: displayName }
+          data: { display_name: displayName, name: displayName, nekuma_first_access: 1 }
         }
       });
       if (error) throw error;
@@ -1446,7 +1568,7 @@
       }
       try { await flushRemoteState(); }
       catch (error) {
-        if (!error.planRestricted && !/\bPLAN_(?:LIMIT|FEATURE)\b|Plano Familia necessario/.test(error.message || "")) throw error;
+        if (!error.planRestricted && !/\bPLAN_(?:LIMIT|FEATURE|CURRENCY)\b|Plano Familia necessario/.test(error.message || "")) throw error;
         // A rejected reconciliation is not a rejected authentication. Keep pending data.
         lastLocalChangeAt = Math.max(Date.now(), (Date.parse(remoteSession.lastSyncedAt || "") || 0) + 1);
         remoteSession.error = "Seu acesso continua liberado. Uma alteracao pendente excede os limites do plano; os dados foram preservados neste aparelho.";
@@ -1609,7 +1731,7 @@
 
       remoteSession.lastSyncedAt = data || now;
     } catch (error) {
-      if (/PLAN_LIMIT|PLAN_FEATURE|Plano Familia necessario/.test(error.message || "")) {
+      if (/PLAN_LIMIT|PLAN_FEATURE|PLAN_CURRENCY|Plano Familia necessario/.test(error.message || "")) {
         lastLocalChangeAt = Math.max(Date.now(), (Date.parse(remoteSession.lastSyncedAt || "") || 0) + 1);
         await loadCommercialAccess();
         const restricted = new Error("Uma alteracao pendente exige outro plano. Seu acesso ao app continua liberado e os dados locais foram preservados.");
@@ -2645,11 +2767,19 @@
     const mergedWallet = mergeSavedWallets(remote.web3Wallet, local.web3Wallet);
     const walletChanged = JSON.stringify(mergedWallet) !== JSON.stringify(remote.web3Wallet);
     const next = { ...remote, ...merged.collections, cryptoAssets: crypto.items, deletedItems, ui: local.ui, web3Wallet: mergedWallet };
+    const pendingBank = pendingFirstAccessBank(remote, local, deletedItems, remoteSession.user);
+    if (pendingBank) next.bankAccounts = [pendingBank];
     for (const [collection, deletions] of Object.entries(deletedItems)) {
       if (Array.isArray(next[collection])) next[collection] = next[collection].filter(item => !deletions[item.id] || itemSyncTime(item) > Date.parse(deletions[item.id]));
     }
     next.vehicle = next.vehicles[0] || createInitialState().vehicle;
-    return { state: next, changed: walletChanged || merged.changed || crypto.changed || cryptoAssetsWereNormalized(rawRemote.cryptoAssets, remote.cryptoAssets) };
+    return { state: next, changed: Boolean(pendingBank) || walletChanged || merged.changed || crypto.changed || cryptoAssetsWereNormalized(rawRemote.cryptoAssets, remote.cryptoAssets) };
+  }
+
+  function pendingFirstAccessBank(remote, local, deletedItems, user) {
+    const id = local.ui.firstAccessPendingBankId;
+    if (!id || !user || user.user_metadata?.nekuma_first_access !== 1 || remote.settings.firstAccessFinished || remote.bankAccounts.length || deletedItems.bankAccounts?.[id]) return null;
+    return local.bankAccounts.find(account => account.id === id && account.createdBy === user.id) || null;
   }
 
   function mergeCollectionWithLocal(remoteItems = [], localItems = [], collection = "") {
@@ -2956,6 +3086,7 @@
       app.innerHTML = renderAuthGate();
       i18n?.translate(document.body, activeLanguage());
       refreshIcons();
+      app.querySelector("#first-access-title")?.focus();
       return;
     }
 
@@ -3004,6 +3135,7 @@
     scheduleCdiRefresh(false);
     setTimeout(showDueAlertIfNeeded, 250);
     setTimeout(runSmartNotifications, 700);
+    maybePromptSecondaryCurrency();
     document.querySelector("#guidedTutorial")?.remove();
   }
 
@@ -3026,6 +3158,7 @@
     return `
       <nav class="desktop-prototype-nav" aria-label="Navegacao principal do desktop">
         <div class="desktop-prototype-brand"><img src="./assets/nekuma-logo-192.png" alt="" /><span>N</span></div>
+        <button class="desktop-prototype-add" type="button" data-action="open-modal" data-modal="addHub" aria-label="Adicionar no app" title="Adicionar"><i data-lucide="plus" aria-hidden="true"></i></button>
         <div class="desktop-prototype-links">
           <button type="button" data-action="open-modal" data-modal="globalSearch" title="Pesquisa global"><i data-lucide="search" aria-hidden="true"></i><span>Pesquisar</span></button>
           ${items.filter(item => commercialTabAllowed(item.tab)).map((item) => `<button class="${item.tab === tab ? "is-active" : ""}" type="button" data-action="${item.tab ? "set-tab" : "prototype-feature"}" ${item.tab ? `data-tab="${item.tab}"` : `data-feature="${item.feature}"`} title="${item.label}"><i data-lucide="${item.icon}" aria-hidden="true"></i><span>${item.label}</span></button>`).join("")}
@@ -3045,7 +3178,7 @@
       if (!match) return;
       const [, workMonth, sourceId] = match;
       const source = incomeSourceById(sourceId);
-      if (!source?.id || normalizedSourceType(source.type) !== "factory") return;
+      if (!source?.id || !currencyVisible(receipt?.currency || source.currency, "JPY") || normalizedSourceType(source.type) !== "factory") return;
       const paymentMonth = receipt?.paymentMonth || addMonths(workMonth, 1);
       const income = (state.transactions || []).find((item) => item.type === "income" && item.title === `Salario ${source.name}` && String(item.date || "").slice(0, 7) === paymentMonth);
       const gross = number(receipt?.grossAmount) || number(income?.amount) || estimateFactorySourceSalary(source, workMonth, paymentMonth).total;
@@ -3058,7 +3191,7 @@
 
     const month = currentMonth();
     (state.creditCards || []).forEach((card) => {
-      if (normalizeCardPaymentMethod(card.paymentMethod) !== "bank" || !card.bankAccountId) return;
+      if (!currencyVisible(card.currency) || normalizeCardPaymentMethod(card.paymentMethod) !== "bank" || !card.bankAccountId) return;
       const dueDate = dateInMonth(month, card.dueDay || 1);
       const bill = creditCardMonthBill(card, month);
       const key = cardBillKey(card.id, month);
@@ -3278,6 +3411,7 @@
   function renderAuthGate() {
     const isLoading = remoteSession.status === "loading";
     if (remoteSession.status === "languageSetup") return renderLanguageSetup();
+    if (firstAccessScreens.includes(remoteSession.status)) return renderFirstAccess(remoteSession.status);
     const canSignup = remoteStore.config.enableSignup !== false;
     const view = authView === "login" || authView === "signup" || authView === "reset" ? authView : "welcome";
     const isSignup = view === "signup";
@@ -3292,7 +3426,7 @@
             <h2>${isReset ? "Recupere sua senha." : isSignup ? "Crie sua conta Nekuma." : "Bem-vindo ao Nekuma."}</h2>
           </div>
           <div class="auth-preview-card">
-            <span>${isReset ? "Nova senha" : isSignup ? "7 dias grátis" : "Acesso seguro"}</span>
+            <span>${isReset ? "Nova senha" : isSignup ? "Nova conta" : "Acesso seguro"}</span>
             <strong>¥ 248,500</strong>
             <small>${isReset ? "Atualize o acesso e volte para o Nekuma" : isSignup ? "Cadastro simples para começar a organizar o mês" : "Entre para acessar sua vida financeira"}</small>
           </div>
@@ -3315,6 +3449,41 @@
         </article>
       </section>
     `;
+  }
+
+  function renderFirstAccess(stage) {
+    const copy = ({
+      "en-US": ["First steps", "Set up your account", "Language", "Country of operation", "Currency", "Choose a country", "Japan", "Brazil", "Other country", "Save and continue", "Welcome to Nekuma Finance", "Continue", "Add your first bank account", "Add bank account"],
+      "ja-JP": ["はじめの一歩", "アカウント設定", "言語", "利用する国", "通貨", "国を選択", "日本", "ブラジル", "その他の国", "保存して続ける", "Nekuma Financeへようこそ", "続ける", "最初の銀行口座を登録", "銀行口座を追加"]
+    })[activeLanguage()] || ["Primeiros passos", "Configure sua conta", "Idioma", "País de operação", "Moeda", "Selecione o país", "Japão", "Brasil", "Outro país", "Salvar e continuar", "Bem-vindo ao Nekuma Finance", "Continuar", "Cadastre sua primeira conta bancária", "Cadastrar conta bancária"];
+    const [kicker, title, languageLabel, countryLabel, currencyLabel, choose, japan, brazil, other, save, welcome, next, bankTitle, bankAction] = copy;
+    const country = state.settings.operationCountry || "";
+    const steps = ({
+      "en-US": ["Add your first source of income", "Add income source", "Congratulations!", "Your bank account is saved.", "Your income source is saved.", "You earned the First Steps medal!", "Open Nekuma Finance"],
+      "ja-JP": ["最初の収入源を登録", "収入源を追加", "おめでとうございます！", "銀行口座を登録しました。", "収入源を登録しました。", "「はじめの一歩」メダルを獲得しました！", "Nekuma Financeを開く"]
+    })[activeLanguage()] || ["Cadastre sua primeira fonte de renda", "Cadastrar fonte de renda", "Parabéns!", "Sua conta bancária foi salva.", "Sua fonte de renda foi salva.", "Você desbloqueou a medalha Primeiros Passos!", "Abrir o Nekuma Finance"];
+    const [incomeTitle, incomeAction, congratulations, bankSaved, incomeSaved, medal, finish] = steps;
+    const celebration = ["bank-saved", "income-saved", "medal"].includes(stage);
+    const trial = proTrialCopy();
+    const heading = ({ setup: title, welcome, bank: bankTitle, income: incomeTitle, "trial-offer": trial.title })[stage] || congratulations;
+    const detail = ({ "bank-saved": bankSaved, "income-saved": incomeSaved, medal, "trial-offer": trial.detail })[stage];
+    const action = ({ setup: save, bank: bankAction, income: incomeAction, medal: finish, "trial-offer": trial.plans })[stage] || next;
+    return `<section class="first-access-shell"><article class="first-access-card" aria-labelledby="first-access-title">
+      ${celebration ? `<div class="first-access-confetti" aria-hidden="true">${Array.from({ length: 24 }, (_, index) => `<i style="--x:${(index * 37) % 101}%;--delay:${(index % 6) * 55}ms;--hue:${(index * 47) % 360};--turn:${(index % 2 ? 1 : -1) * (180 + index * 11)}deg"></i>`).join("")}</div>` : ""}
+      <img src="./assets/nekuma-logo-192.png" width="48" height="48" alt="" />
+      <p class="auth-kicker">${kicker}</p><h2 id="first-access-title" tabindex="-1">${heading}${stage === "welcome" ? `, ${escapeHtml(currentUserAuthor().name)}!` : ""}</h2>
+      ${detail ? `<p role="status">${detail}</p>` : ""}
+      ${remoteSession.error ? `<p class="auth-error" role="alert">${escapeHtml(remoteSession.error)}</p>` : ""}
+      <form class="form-grid" data-form="first-access-${stage}">
+        ${stage === "setup" ? `<div class="field"><label for="operationLanguage">${languageLabel}</label><select id="operationLanguage" name="language" required>
+          ${[["pt-BR", "Português"], ["en-US", "English"], ["ja-JP", "日本語"]].map(([code, label]) => `<option value="${code}" ${selectedAttr(code, activeLanguage())}>${label}</option>`).join("")}</select></div>
+          <div class="field"><label for="operationCountry">${countryLabel}</label><select id="operationCountry" name="country" required><option value="">${choose}</option>
+          ${[["japao", japan], ["brasil", brazil], ["other", other]].map(([code, label]) => `<option value="${code}" ${selectedAttr(code, country)}>${label}</option>`).join("")}</select></div>
+          <div class="field"><label for="operationCurrency">${currencyLabel}</label><select id="operationCurrency" name="currency" required><option value=""></option>
+          ${Object.values(operationCurrencies).map(code => `<option value="${code}" ${selectedAttr(code, country ? state.settings.baseCurrency : "")}>${code}</option>`).join("")}</select></div>` : ""}
+        <button class="primary-button" type="submit">${action}</button>
+      </form>
+    </article></section>`;
   }
 
   function renderLanguageSetup() {
@@ -3903,7 +4072,8 @@
   function currentAppNews() {
     const access = remoteSession.commercialAccess;
     const notices = access?.userId === remoteSession.user?.id ? access?.notices || [] : [];
-    return [...notices.map((item) => ({ id: item.id, date: String(item.created_at).slice(0, 10),
+    const expiry = proTrialExpiryNotice(commercialSnapshot());
+    return [...(expiry ? [expiry] : []), ...notices.map((item) => ({ id: item.id, date: String(item.created_at).slice(0, 10),
       title: item.plan === "family" ? "Seu plano Familia esta ativo" : "Seu plano PRO esta ativo",
       body: item.plan === "family" ? "Os recursos PRO e de conexao familiar foram liberados para sua conta." : "Os recursos PRO foram liberados para sua conta."
     })), ...appNews];
@@ -3984,9 +4154,9 @@
 
     return `
       <div class="desktop-dashboard-shell">
-        <div class="desktop-dashboard-top">
+        ${visibleSecondaryCurrency() ? `<div class="desktop-dashboard-top">
           ${renderFxCards()}
-        </div>
+        </div>` : ""}
 
         <div class="desktop-dashboard-month-row">
           ${renderToolbar()}
@@ -4188,18 +4358,18 @@
               <button type="button" data-action="set-tab" data-tab="wealth">Investimentos</button>
               <button class="is-disabled" type="button" data-action="prototype-feature" data-feature="Novo espaco" aria-label="Novo espaco, em breve">+</button>
             </nav>
-            <div class="workspace-metrics">
+            <div class="workspace-metrics${visibleSecondaryCurrency() ? "" : " workspace-metrics-single"}">
               <article class="workspace-metric workspace-salary-metric" tabindex="0">
                 <span>Salario previsto</span>
                 <strong>${hideBalance ? "*****" : formatMoney(salaryTotal, primaryCurrency())}</strong>
                 <small>${salaryCards.length ? `${salaryCards.length} fonte${salaryCards.length === 1 ? "" : "s"} no mes` : "Cadastre uma fonte de renda"}</small>
                 ${hasCommercialFeature("salary_projection") ? renderWorkspaceSalaryPopover(salaryCards, hideBalance) : `<small>Bruto previsto - Antes dos descontos</small>`}
               </article>
-              <article class="workspace-metric workspace-quote"><span>Dolar / Real</span><strong>${quotes.usdBrl ? formatFxRate(quotes.usdBrl, 4) : "--"}</strong>${renderFxChangeChip(quotes.usdBrlChange)}</article>
+              ${visibleSecondaryCurrency() ? `<article class="workspace-metric workspace-quote"><span>Dolar / Real</span><strong>${quotes.usdBrl ? formatFxRate(quotes.usdBrl, 4) : "--"}</strong>${renderFxChangeChip(quotes.usdBrlChange)}</article>
               <article class="workspace-metric workspace-quote"><span>Dolar / Iene</span><strong>${usdJpy ? formatYenRate(usdJpy) : "--"}</strong>${renderFxChangeChip(quotes.usdJpyChange)}</article>
               <article class="workspace-metric workspace-quote"><span>BTC / Dolar</span><strong>${btcUsd ? formatUsdRate(btcUsd) : "--"}</strong>${renderFxChangeChip(quotes.btcUsdChange)}</article>
               ${renderWorkspaceFxConverter()}
-              <article class="workspace-metric workspace-update-metric"><span>Atualizado</span><strong>${updatedLabel}</strong><button type="button" data-action="refresh-fx" aria-label="Atualizar cotacoes"><i data-lucide="refresh-cw" aria-hidden="true"></i></button></article>
+              <article class="workspace-metric workspace-update-metric"><span>Atualizado</span><strong>${updatedLabel}</strong><button type="button" data-action="refresh-fx" aria-label="Atualizar cotacoes"><i data-lucide="refresh-cw" aria-hidden="true"></i></button></article>` : ""}
             </div>
           </div>
         </div>
@@ -4622,10 +4792,8 @@
   }
 
   function renderSalaryTotalConverted(total, currency, month = state.ui.selectedMonth) {
-    const sourceCurrency = sanitizeCurrency(currency, primaryCurrency());
-    if (sourceCurrency === "BRL") return "";
-    const converted = convert(total, sourceCurrency, "BRL", latestRate(month));
-    return `<div class="salary-total-converted">(${formatMoney(converted, "BRL")})</div>`;
+    const comparison = formatMoneyComparison(total, currency, month);
+    return comparison ? `<div class="salary-total-converted">(${comparison})</div>` : "";
   }
 
   function dashboardSalaryCards(month = state.ui.selectedMonth) {
@@ -5293,11 +5461,49 @@
         return;
       }
       if (remoteSession.user?.id === userId && !error && data && ["free", "pro", "family"].includes(data.plan)) {
-        const notices = await remoteStore.client.rpc("my_commercial_notifications");
+        const [notices, trial] = await Promise.all([
+          remoteStore.client.rpc("my_commercial_notifications"),
+          data.plan === "free" && data.status === "free" ? remoteStore.client.rpc("my_pro_trial_offer") : null
+        ]);
         if (remoteSession.user?.id !== userId) return;
-        remoteSession.commercialAccess = { ...data, userId, checkedAt: Date.now(), notices: !notices.error && Array.isArray(notices.data) ? notices.data : [] };
+        remoteSession.commercialAccess = { ...data, userId, checkedAt: Date.now(), trialAvailable: trial?.data === true && !trial.error, notices: !notices.error && Array.isArray(notices.data) ? notices.data : [] };
       }
     } catch { /* Commercial availability must not interrupt financial synchronization. */ }
+  }
+
+  function proTrialCopy() {
+    return ({
+      "en-US": { title: "3 days of PRO available", detail: "Activate the trial in Plans. No card required and no automatic charge.", plans: "Go to Plans", activate: "Activate PRO trial", activated: "PRO trial activated.", unavailable: "Could not activate the PRO trial. Refresh Plans and try again.", expiry: "Your PRO trial ends soon", until: "Your trial ends on", renew: "Visit Plans to check subscription availability." },
+      "ja-JP": { title: "PROを3日間お試しいただけます", detail: "プラン画面で開始できます。カード登録や自動請求はありません。", plans: "プランへ", activate: "PRO体験を開始", activated: "PRO体験を開始しました。", unavailable: "PRO体験を開始できませんでした。プラン画面を更新して再度お試しください。", expiry: "PRO体験の終了が近づいています", until: "体験の終了日時：", renew: "プラン画面で登録状況をご確認ください。" }
+    })[activeLanguage()] || { title: "3 dias de PRO disponíveis", detail: "Ative o teste em Planos. Sem cartão e sem cobrança automática.", plans: "Ir para Planos", activate: "Ativar teste PRO", activated: "Teste PRO ativado.", unavailable: "Não foi possível ativar o teste PRO. Atualize a tela de Planos e tente novamente.", expiry: "Seu teste PRO termina em breve", until: "Seu teste termina em", renew: "Confira em Planos se a assinatura está disponível." };
+  }
+
+  function proTrialExpiryNotice(access, now = Date.now()) {
+    const end = Date.parse(access?.trialEndsAt || "");
+    if (access?.plan !== "pro" || access.status !== "trialing" || !Number.isFinite(end) || end <= now || end - now > 86400000) return null;
+    const copy = proTrialCopy();
+    const formatted = new Date(end).toLocaleString(activeLanguage(), { dateStyle: "short", timeStyle: "short" });
+    return { id: `pro-trial-ending:${end}`, date: localDateKey(), title: copy.expiry, body: `${copy.until} ${formatted}. ${copy.renew}` };
+  }
+
+  async function activateProTrial(button) {
+    const access = commercialSnapshot();
+    if (proTrialActivationBusy || state.ui.activeTab !== "plans" || access?.trialAvailable !== true) return;
+    proTrialActivationBusy = true;
+    button.disabled = true;
+    const copy = proTrialCopy();
+    try {
+      const { error } = await remoteStore.client.rpc("activate_my_pro_trial");
+      await loadCommercialAccess();
+      if (remoteSession.user?.id !== access.userId) return;
+      if (error && commercialSnapshot()?.status !== "trialing") throw error;
+      showToast(copy.activated);
+    } catch {
+      if (remoteSession.user?.id === access.userId) showToast(copy.unavailable);
+    } finally {
+      proTrialActivationBusy = false;
+      if (remoteSession.user?.id === access.userId) renderKeepingScroll();
+    }
   }
 
   function renderPlansWiseCard() {
@@ -5324,21 +5530,25 @@
   function renderVerifiedPlansPage() {
     const access = remoteSession.commercialAccess?.userId === remoteSession.user?.id ? remoteSession.commercialAccess : null;
     const current = access?.plan;
+    const trial = proTrialCopy();
+    const trialExpiry = proTrialExpiryNotice(access);
     const liveReady = stripeLiveSnapshot?.userId === remoteSession.user?.id && stripeLiveSnapshot.available === true;
     const descriptions = {
-      free: ["1 conta bancaria e 1 cartao", "1 fabrica ou fonte de renda", "Salario bruto previsto, antes dos descontos", "Comparativo mensal", "Cripto manual", "Organizacao fixa dos cards", "Exportacao dos seus dados"],
-      pro: ["Varias contas, cartoes e empresas", "Salario detalhado e projecao de saldo", "Organizacao personalizada dos cards", "30 scans por mes", "Integracoes MetaMask e Binance", "Automacoes e patrimonio"],
+      free: ["1 moeda principal", "1 conta bancaria e 1 cartao", "1 fabrica ou fonte de renda", "Salario bruto previsto, antes dos descontos", "Comparativo mensal", "Cripto manual", "Organizacao fixa dos cards", "Exportacao dos seus dados"],
+      pro: ["Comparacao em uma segunda moeda", "Varias contas, cartoes e empresas", "Salario detalhado e projecao de saldo", "Organizacao personalizada dos cards", "30 scans por mes", "Integracoes MetaMask e Binance", "Automacoes e patrimonio"],
       family: ["Tudo do PRO", "Ate 5 membros", "60 scans mensais compartilhados", "Raio-X familiar", "Moradia com responsaveis por conta"]
     };
-    const labels = { free: "Gratis", pro: "PRO", family: "Familia" };
+    const labels = { free: "Single", pro: "PRO", family: "Familia" };
     return `<div class="detail-page-shell commercial-page">
       ${renderPageIntro("Planos Nekuma", "Seu plano e seus recursos", liveReady ? "PRO por JPY 480/mes. Dados preservados em qualquer plano." : "Dados preservados em qualquer plano. Contratacao comercial em preparacao.")}
       ${renderPaypalSandboxStatus()}
       ${renderStripeTestPanel()}
       ${renderStripeLivePanel()}
+      ${access?.trialAvailable === true ? `<section class="content-panel"><div class="panel-head"><div><h2>${trial.title}</h2><p class="row-meta">${trial.detail}</p></div><button class="primary-button" type="button" data-action="activate-pro-trial" ${proTrialActivationBusy ? "disabled" : ""}>${trial.activate}</button></div></section>` : ""}
+      ${trialExpiry ? `<section class="content-panel" role="status"><h2>${trialExpiry.title}</h2><p>${escapeHtml(trialExpiry.body)}</p></section>` : ""}
       <section class="content-panel"><h2>${access ? `Plano ${labels[current]}` : "Plano aguardando validacao"}</h2>
         <p class="row-meta">${access ? "Informacao consultada no servidor." : "A base comercial precisa estar disponivel no Supabase para confirmar seu acesso."}</p>
-        ${access?.status === "trialing" && access.trialEndsAt ? `<p>Teste ate ${escapeHtml(new Date(access.trialEndsAt).toLocaleString())}</p>` : ""}
+        ${access?.status === "trialing" && current === "pro" && Date.parse(access.trialEndsAt) > Date.now() ? `<p>Teste ate ${escapeHtml(new Date(access.trialEndsAt).toLocaleString(activeLanguage()))}</p>` : ""}
         ${access?.familySponsored ? "<p>Acesso fornecido pela assinatura da familia.</p>" : ""}
         ${access?.paidUntil ? `<p>Periodo pago ate ${escapeHtml(new Date(access.paidUntil).toLocaleString())}</p>` : ""}
         <p class="row-meta">${access?.enforcementActive ? "Limites ativos. Registros existentes sao preservados ao trocar de plano." : "Ativacao dos limites no servidor pendente."}</p>
@@ -5350,6 +5560,7 @@
   }
 
   function renderWise() {
+    if (isSingleCurrencyPlan()) return "";
     const month = state.ui.selectedMonth;
     const transfers = monthTransfers(month);
     const totalSent = sum(transfers, "sentAmount");
@@ -5472,7 +5683,7 @@
       });
     }
 
-    (state.receipts || [])
+    visibleCurrencyRecords(state.receipts || [])
       .filter(receipt => String(receipt.date || "").slice(0, 7) === month && !receipt.linkedTransactionId && !receipt.linkedCardPurchaseId)
       .forEach(receipt => {
         const match = transactions.find(transaction => {
@@ -5673,7 +5884,7 @@
               <div class="two-cols">
                 <div class="field"><label for="baseCurrency">Moeda principal</label><select id="baseCurrency" name="baseCurrency">${currencyOptions(primaryCurrency())}</select><p class="row-meta">Usada nos saldos, graficos e relatorios.</p></div>
               </div>
-              <div class="field"><label for="secondaryCurrency">Moeda secundaria</label><select id="secondaryCurrency" name="secondaryCurrency">${currencyOptions(secondaryCurrency())}</select><p class="row-meta">Aparece entre parenteses como comparativo. Nao pode ser igual a principal.</p></div>
+              ${canChooseSecondaryCurrency() ? `<div class="field"><label for="secondaryCurrency">Moeda secundaria</label><select id="secondaryCurrency" name="secondaryCurrency"><option value="">Sem moeda secundaria</option>${secondaryCurrencyOptions(visibleSecondaryCurrency())}</select><p class="row-meta">Aparece entre parenteses como comparativo.</p></div>` : ""}
               <div class="settings-profile-card">
                 <div class="panel-head compact"><h3>Perfil do usuario</h3><span class="chip blue">Pessoal</span></div>
                 <div class="two-cols">
@@ -5782,7 +5993,7 @@
   }
 
   function renderReceiptHistory() {
-    const receipts = (state.receipts || []).filter((item) => String(item.date || "").slice(0, 7) === state.ui.selectedMonth).sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    const receipts = visibleCurrencyRecords(state.receipts || []).filter((item) => String(item.date || "").slice(0, 7) === state.ui.selectedMonth).sort((a, b) => String(b.date).localeCompare(String(a.date)));
     if (!receipts.length) return `<div class="empty-state compact"><i data-lucide="receipt-text"></i><strong>Nenhum recibo neste mes</strong><p>Use o scan para guardar o comprovante e criar ou conciliar a despesa.</p></div>`;
     return `<div class="receipt-history-list">${receipts.map((item) => `<article class="receipt-history-row">${item.imageData ? `<img src="${escapeAttr(item.imageData)}" alt="" />` : `<span class="row-icon">R</span>`}<div><strong>${escapeHtml(item.merchant || "Recibo")}</strong><small>${formatShortDate(item.date)} · ${escapeHtml(item.category)} · ${escapeHtml(scannedPaymentMethods[item.paymentMethod] || "Pagamento nao informado")}</small><span class="chip ${item.linkedTransactionId || item.linkedCardPurchaseId ? "green" : "blue"}">${item.linkedTransactionId || item.linkedCardPurchaseId ? "Integrado ao financeiro" : "Pendente"}</span></div><b>${formatMoneyWithPrimary(item.amount, item.currency, item.date.slice(0, 7))}</b><div class="row-actions"><button class="icon-button" type="button" data-action="open-modal" data-modal="receipt" data-id="${escapeAttr(item.id)}" aria-label="Editar recibo"><i data-lucide="pencil"></i></button><button class="icon-button" type="button" data-action="delete-receipt" data-id="${escapeAttr(item.id)}" aria-label="Excluir recibo"><i data-lucide="trash-2"></i></button></div></article>`).join("")}</div>`;
   }
@@ -5843,7 +6054,7 @@
 
         <div class="smart-earned-medals">
           <p class="mini-label">Medalhas conquistadas</p>
-          <div>${model.medals.length ? model.medals.map((item) => `<span title="${escapeAttr(item.detail)}"><i data-lucide="${item.icon}" aria-hidden="true"></i>${escapeHtml(item.label)}${item.tier !== "permanent" ? ` · ${escapeHtml(achievementTierLabel(item.tier))}` : ""}</span>`).join("") : `<small>Suas conquistas aparecerao aqui.</small>`}</div>
+          <div>${model.medals.length ? model.medals.map((item) => `<span title="${escapeAttr(item.detail)}"><i data-lucide="${item.icon}" aria-hidden="true"></i>${escapeHtml(item.label)}${item.tier !== "permanent" ? ` · ${escapeHtml(achievementTierLabel(item.tier))}` : ""}${item.unlockedAt ? ` <time datetime="${escapeAttr(item.unlockedAt)}">${escapeHtml(new Date(item.unlockedAt).toLocaleString(activeLanguage(), { dateStyle: "short", timeStyle: "short" }))}</time>` : ""}</span>`).join("") : `<small>Suas conquistas aparecerao aqui.</small>`}</div>
         </div>
 
         <div class="smart-profile-actions">
@@ -5882,7 +6093,7 @@
     const earnedKeys = new Map((state.achievementLedger || []).map((item) => [item.key, item]));
     const medals = achievementRows
       .filter((item) => earnedKeys.has(item.key))
-      .map((item) => ({ ...item, tier: earnedKeys.get(item.key).tier }))
+      .map((item) => ({ ...item, ...earnedKeys.get(item.key) }))
       .slice(0, 4);
     const nextMedal = achievementRows.find((item) => !earnedKeys.has(item.key) || (item.nextTier && item.progress < 100))
       || { label: "Evolucao continua", detail: "Continue acompanhando seus habitos financeiros.", progress: 100 };
@@ -5912,7 +6123,7 @@
 
   function achievementDefinitions() {
     return [
-      { key: "first_steps", label: "Primeiro Passo", detail: "Registre e categorize suas primeiras movimentacoes.", icon: "sprout", category: "Onboarding", permanent: true },
+      { key: "first_steps", label: "Primeiros Passos", detail: "Cadastre sua primeira conta bancaria e fonte de renda.", icon: "sprout", category: "Onboarding", permanent: true },
       { key: "green_month", label: "Mes no Verde", detail: "Feche meses com receitas superiores as despesas.", icon: "circle-check-big", category: "Equilibrio", tiers: { bronze: 1, silver: 3, gold: 6, diamond: 12 } },
       { key: "first_reserve", label: "Primeira Reserva", detail: "Crie a reserva de emergencia e faca o primeiro aporte.", icon: "shield-check", category: "Reserva", permanent: true },
       { key: "goal_achieved", label: "Meta Alcancada", detail: "Complete sua primeira meta financeira.", icon: "flag", category: "Metas", permanent: true },
@@ -5929,7 +6140,6 @@
 
   function evaluateAchievement(definition) {
     const snapshots = normalizeFinancialSnapshots(state.financialSnapshots);
-    const currentTransactions = (state.transactions || []).filter((item) => outflowTypes.includes(item.type) && !item.settlementOnly && String(item.category || "").trim());
     const reserve = emergencyGoal();
     const reserveProgress = reserve ? goalProgress(reserve) : { saved: 0, percent: 0 };
     const nonEmergencyGoals = activeFinancialGoals().filter((goal) => goal.templateKey !== "emergency");
@@ -5944,7 +6154,7 @@
     let value = 0;
     let unlocked = false;
     if (definition.key === "first_steps") {
-      value = currentTransactions.length || (activeBankAccounts().length && userIncomeSources().length ? 1 : 0);
+      value = activeBankAccounts().length && userIncomeSources().length ? 1 : 0;
       unlocked = value > 0;
     } else if (definition.key === "green_month") {
       value = consecutiveSnapshotCount((item) => item.income > item.expenses);
@@ -6226,9 +6436,42 @@
     return remoteSession.user?.id && remoteSession.commercialAccess?.userId === remoteSession.user.id ? remoteSession.commercialAccess : null;
   }
 
+  function isSingleCurrencyPlan() {
+    return commercialSnapshot()?.plan === "free";
+  }
+
+  function currencyVisible(currency, fallback = primaryCurrency()) {
+    return !isSingleCurrencyPlan() || sanitizeCurrency(currency, fallback) === primaryCurrency();
+  }
+
+  function visibleCurrencyRecords(records) {
+    return isSingleCurrencyPlan() ? records.filter(item => currencyVisible(item.currency, countryMeta[item.country]?.currency || primaryCurrency())) : records;
+  }
+
+  function guardSingleCurrencyForm(type, data = {}) {
+    if (!isSingleCurrencyPlan()) return true;
+    if (type === "transfer" || (["vehicle", "vehicleMaintenance", "vehicle-maintenance"].includes(type) && primaryCurrency() !== "JPY")) {
+      showToast("Este cadastro nao esta disponivel na sua moeda principal.");
+      return false;
+    }
+    if (["currency", "costCurrency", "feeCurrency"].some(key => data[key] && data[key] !== primaryCurrency())) {
+      showToast(`O plano Single permite cadastrar valores apenas em ${primaryCurrency()}.`);
+      return false;
+    }
+    return true;
+  }
+
+  function restrictSingleCurrencyFields(root) {
+    if (!isSingleCurrencyPlan()) return;
+    root.querySelectorAll('select[name="currency"], select[name="costCurrency"], select[name="feeCurrency"]').forEach(select => {
+      const code = primaryCurrency();
+      select.replaceChildren(new Option(code, code, true, true));
+    });
+  }
+
   function planVisibleRecords(records) {
     if (commercialSnapshot()?.plan !== "free") return records;
-    const active = records.filter(item => item.active !== false);
+    const active = visibleCurrencyRecords(records).filter(item => item.active !== false);
     if (!active.length) return [];
     // Legacy records without timestamps retain their original persisted order.
     if (active.some(item => !Number.isFinite(Date.parse(item.createdAt || item.created_at || "")))) return active.slice(0, 1);
@@ -6245,6 +6488,7 @@
     if (!hasCommercialFeature("projections")) frozen.push("projectionScenarios");
     if (!hasCommercialFeature("receipt_scan")) frozen.push("receipts");
     if (!hasFamilyAccess()) frozen.push("familyMembers", "familyBusinesses");
+    if (isSingleCurrencyPlan()) frozen.push(...singleCurrencyCollections.filter(key => !frozen.includes(key)));
     const result = { ...nextState };
     if (commercialSnapshot()?.plan === "free") {
       result.ui = { ...nextState.ui };
@@ -6518,7 +6762,7 @@
 
   function renderCommitmentList(limit) {
     const month = state.ui.selectedMonth;
-    const commitments = state.commitments
+    const commitments = visibleCurrencyRecords(state.commitments)
       .filter((item) => item.active !== false)
       .filter((item) => inCountryScope(item.country))
       .filter((item) => isCommitmentDueInMonth(item, month))
@@ -7011,7 +7255,7 @@
   }
 
   function renderCreditCardHomePanel() {
-    const cards = state.creditCards || [];
+    const cards = planVisibleRecords(state.creditCards || []);
     if (!cards.length) {
       return `
         <div class="card-mini-empty">
@@ -7908,12 +8152,7 @@
   }
 
   function subscriptionMonthTotalLabel(month = state.ui.selectedMonth) {
-    const currency = primaryCurrency();
-    const total = subscriptionMonthTotal(month);
-    if (currency === "BRL") return formatMoney(total, "BRL");
-    const rate = latestRate(month);
-    const totalBrl = convert(total, currency, "BRL", rate);
-    return `${formatMoney(total, currency)} <small>${formatMoney(totalBrl, "BRL")}</small>`;
+    return formatMoneyWithPrimary(subscriptionMonthTotal(month), primaryCurrency(), month);
   }
 
   function renderFinancialGoalsPanel() {
@@ -8358,7 +8597,7 @@
 
   function renderHousingPanel(limit) {
     const month = state.ui.selectedMonth;
-    const cards = (state.housingCards || [])
+    const cards = visibleCurrencyRecords(state.housingCards || [])
       .filter((item) => item.active !== false)
       .filter((item) => inCountryScope(item.country));
     if (!cards.length) {
@@ -8379,7 +8618,7 @@
   }
 
   function renderHousingCard(card, month, compact = false) {
-    const rows = housingCardMonthRows(card, month);
+    const rows = visibleCurrencyRecords(housingCardMonthRows(card, month));
     const totalCurrency = primaryCurrency();
     const totalOpen = rows
       .filter((item) => !item.obligationPaid && item.paymentMethod !== "company")
@@ -9344,6 +9583,7 @@
   }
 
   function openModal(type, id = "") {
+    if (!guardSingleCurrencyForm(type)) return;
     const feature = commercialFeatureForType(type);
     if (type === "salaryReceipt" && !hasCommercialFeature("salary_projection")) { showPlanUpgrade("Salario detalhado"); return; }
     if (type === "creditCard" && !guardCommercialForm(type, { id })) return;
@@ -9402,6 +9642,12 @@
       : type === "monthlyPayment" || type === "goalContribution" || type === "salaryReceipt" || type === "nubankBoxContribution"
         ? id
         : editableItem(type, id);
+    const foreignCurrency = modalData && typeof modalData === "object" && (modalData.currency || modalData.costCurrency);
+    const mixedCurrency = type === "housingCard" && Array.isArray(modalData?.items) && modalData.items.some(item => !currencyVisible(item.currency, foreignCurrency || primaryCurrency()));
+    if (id && (mixedCurrency || (foreignCurrency && !currencyVisible(foreignCurrency)) || !currencyVisible(modalData?.feeCurrency))) {
+      showToast("Este registro foi preservado em outra moeda.");
+      return;
+    }
     const content = map[type] ? map[type](modalData) : "";
     modalRoot.innerHTML = `
       <div class="modal-backdrop">
@@ -9429,6 +9675,7 @@
     updateCreditCardPaymentFields();
     updateDebtTypeFields();
     updateMonthlyPaymentFields();
+    restrictSingleCurrencyFields(modalRoot);
     if (readOnly) {
       modalRoot.querySelectorAll("form input, form select, form textarea, form button").forEach(control => { control.disabled = true; });
       const notice = document.createElement("div"); notice.innerHTML = renderPlanLock("Consulta do historico"); modalRoot.querySelector(".modal")?.append(notice);
@@ -9540,7 +9787,12 @@
   }
 
   function closeModal() {
+    const guided = modalRoot.querySelector("form[data-first-access]")?.dataset.firstAccess;
     modalRoot.innerHTML = "";
+    if (guided && firstAccessStage() === guided && remoteSession.status === "ready") {
+      remoteSession.status = guided;
+      render();
+    }
   }
 
   function renderAddHubModal() {
@@ -10142,7 +10394,9 @@
   }
 
   function renderQuickExpenseModal() {
-    const activeCountry = state.ui.activeCountry === "global" ? "japao" : state.ui.activeCountry;
+    const activeCountry = state.ui.activeCountry === "global"
+      ? selectedDashboardAccount()?.country || (state.settings.operationCountry === "brasil" ? "brasil" : "japao")
+      : state.ui.activeCountry;
     const currency = countryMeta[activeCountry].currency;
     return `
       <div class="modal-head">
@@ -10847,9 +11101,10 @@
   }
 
   function renderBankAccountModal(item = null) {
-    const activeCountry = item?.country || (state.ui.activeCountry === "global" ? "japao" : state.ui.activeCountry);
+    const firstBank = !item && firstAccessStage() === "bank";
+    const activeCountry = item?.country || (firstBank ? state.settings.operationCountry : state.ui.activeCountry);
     const country = activeCountry === "brasil" ? "brasil" : "japao";
-    const selectedCurrency = item?.currency || countryMeta[country].currency;
+    const selectedCurrency = item?.currency || (firstBank ? primaryCurrency() : countryMeta[country].currency);
     const selectedType = item?.accountType || defaultBankAccountType(country);
     const balanceDate = item?.balanceDate || dateInMonth(state.ui.selectedMonth || currentMonth(), new Date().getDate());
     const nextColor = sanitizeColor(item?.color, bankAccountColors[activeBankAccounts().length % bankAccountColors.length]);
@@ -11634,6 +11889,7 @@
 
   function renderIncomeSourceModal(item = null) {
     const accounts = activeBankAccounts();
+    const firstIncome = !item && firstAccessStage() === "income";
     if (!accounts.length && !item) {
       return `
         <div class="modal-head">
@@ -11649,13 +11905,13 @@
       `;
     }
     const nextColor = item?.color || sourceColors[userIncomeSources().length % sourceColors.length];
-    const sourceType = normalizedSourceType(item?.type);
+    const sourceType = normalizedSourceType(item?.type || (firstIncome && state.settings.operationCountry !== "japao" ? "other" : ""));
     const customType = item?.customType || (sourceType === "other" && item?.type && !incomeSourceTypeMeta[item.type] ? item.type : "");
     const schedule = factoryScheduleConfig(item || {});
     const salaryProgressions = normalizeSalaryProgressions(item?.salaryProgressions || []);
     return `
       <div class="modal-head">
-        <h2>${item ? "Editar empresa" : "Nova empresa"}</h2>
+        <h2>${item ? "Editar empresa" : firstIncome ? "Nova fonte de renda" : "Nova empresa"}</h2>
         <button class="close-button" type="button" data-action="close-modal" aria-label="Fechar">x</button>
       </div>
       <form class="form-grid" data-form="income-source">
@@ -11695,10 +11951,10 @@
         <div class="field">
           <label for="sourceBankAccountId">Conta para receber</label>
           <select id="sourceBankAccountId" name="bankAccountId" required>
-            ${bankAccountSelectOptions("global", item?.bankAccountId || "", accounts.length ? "Escolha a conta" : "Cadastre uma conta primeiro")}
+            ${bankAccountSelectOptions("global", item?.bankAccountId || (firstIncome ? accounts[0]?.id : ""), accounts.length ? "Escolha a conta" : "Cadastre uma conta primeiro")}
           </select>
         </div>
-        <div class="factory-source-fields ${sourceType === "factory" ? "" : "is-hidden"}">
+        <fieldset class="factory-source-fields ${sourceType === "factory" ? "" : "is-hidden"}" ${sourceType === "factory" ? "" : "disabled"}>
           <div class="form-section-title">
             <strong>Escala da fabrica</strong>
             <span>Usada para preencher o calendario da tela inicial.</span>
@@ -11837,7 +12093,7 @@
               ${(salaryProgressions.length ? salaryProgressions : [{}]).map((row) => renderSalaryProgressionRow(row)).join("")}
             </div>
           </div>
-        </div>
+        </fieldset>
         <div class="form-actions">
           <button class="secondary-button" type="button" data-action="close-modal">Cancelar</button>
           <button class="primary-button" type="submit">Salvar empresa</button>
@@ -12342,6 +12598,10 @@
 
   function saveQuickExpense(form) {
     const data = formData(form);
+    if (data.bankAccountId && !quickExpenseBankAccount(data.country, data.bankAccountId)) {
+      showToast("Selecione uma conta bancaria do pais do gasto.");
+      return;
+    }
     const author = currentUserAuthor();
     state.transactions.unshift(applyAutomaticClassification({
       id: uid("tx"),
@@ -12924,6 +13184,7 @@
 
   function saveBankAccount(form) {
     const data = formData(form);
+    const guided = !data.id && firstAccessStage() === "bank";
     const country = data.country === "brasil" ? "brasil" : "japao";
     const accountId = data.id || uid(collectionPrefixes.bankAccounts || "ba");
     const existingAccount = bankAccountById(accountId);
@@ -12945,9 +13206,12 @@
       state.ui.primaryBankAccountId = accountId;
       state.ui.selectedDashboardAccountId = accountId;
     }
-    saveState();
+    if (guided) state.ui.firstAccessPendingBankId = accountId;
+    saveState({ remoteNow: guided });
+    if (guided) remoteSession.status = "bank-saved";
     closeModal();
     render();
+    if (guided) return;
     showToast(updated ? "Conta bancaria atualizada." : "Conta bancaria salva.");
   }
 
@@ -13281,8 +13545,13 @@
   }
 
   function saveIncomeSource(form) {
-    const data = formData(form);
-    const sourceType = normalizedSourceType(data.type);
+    const input = formData(form);
+    const sourceType = normalizedSourceType(input.type);
+    const isFactory = sourceType === "factory";
+    const data = isFactory ? input : Object.fromEntries(
+      ["id", "name", "customType", "bankAccountId", "currency", "color"].map(key => [key, input[key]])
+    );
+    const guided = !data.id && firstAccessStage() === "income";
     if (!data.bankAccountId || !bankAccountById(data.bankAccountId)) {
       showToast("Cadastre e selecione a conta que recebera esta renda.");
       return;
@@ -13305,11 +13574,10 @@
     }
     const contractKeys = ["salaryDayBreaks", "salaryNightBreaks", "salaryShift1Breaks", "salaryShift2Breaks", "salaryShift3Breaks"];
     const validTime = /^(?:[01]\d|2[0-3]):[0-5]\d\s*-\s*(?:[01]\d|2[0-3]):[0-5]\d$/;
-    if (contractKeys.some(key => contractBreaks(data[key]).some(value => !validTime.test(value) || shiftDurationHours(value) === 24))) {
+    if (isFactory && contractKeys.some(key => contractBreaks(data[key]).some(value => !validTime.test(value) || shiftDurationHours(value) === 24))) {
       showToast("Confira os intervalos: HH:MM-HH:MM, separados por virgula.");
       return;
     }
-    const isFactory = sourceType === "factory";
     const banNaming = isFactory ? String(data.banNaming || "colors") : "";
     const author = currentUserAuthor();
     const updated = upsertItem("incomeSources", data.id, {
@@ -13383,9 +13651,11 @@
       salaryBonuses: isFactory ? collectSalaryBonuses(form) : [],
       salaryProgressions: isFactory ? collectSalaryProgressions(form) : []
     });
-    saveState();
+    saveState({ remoteNow: guided });
+    if (guided) remoteSession.status = "income-saved";
     closeModal();
     render();
+    if (guided) return;
     const savedSource = userIncomeSources().find((source) => source.id === data.id)
       || userIncomeSources().at(-1);
     const missingSalary = isFactory && !hasFactorySalaryConfig(savedSource);
@@ -13737,7 +14007,9 @@
     }
     const baseCurrency = sanitizeCurrency(data.baseCurrency, PRIMARY_CURRENCY);
     state.settings.baseCurrency = baseCurrency;
-    state.settings.secondaryCurrency = sanitizeSecondaryCurrency(data.secondaryCurrency, baseCurrency);
+    if (canChooseSecondaryCurrency() && Object.hasOwn(data, "secondaryCurrency")) {
+      setSecondaryCurrencyPreference(data.secondaryCurrency, baseCurrency);
+    }
     state.profile = {
       country: String(data.profileCountry || "").trim(),
       city: String(data.profileCity || "").trim(),
@@ -15804,7 +16076,7 @@
   }
 
   function summarizeMonth(month, country) {
-    const targetCurrency = country === "brasil" ? "BRL" : primaryCurrency();
+    const targetCurrency = !isSingleCurrencyPlan() && country === "brasil" ? "BRL" : primaryCurrency();
     const rate = latestRate(month);
     const txs = monthTransactions(month, country);
     const transfers = monthTransfers(month);
@@ -15857,7 +16129,7 @@
     });
 
     plannedCardBillEntries(month, country).forEach((item) => {
-      const detailed = cardPurchaseRowsForCard(item.cardId, month).reduce((total, row) => total + number(row.amount), 0);
+      const detailed = cardPurchaseRowsForCard(item.cardId, month).filter(row => currencyVisible(row.rawCurrency, item.currency)).reduce((total, row) => total + number(row.amount), 0);
       const converted = convert(Math.max(0, item.amount - detailed), item.currency, targetCurrency, rate);
       expenses += converted;
       plannedExpenses += converted;
@@ -15888,7 +16160,7 @@
     });
 
     if (country === "global" || country === "japao") {
-      vehicleMonthlyCosts(month).forEach((item) => {
+      visibleCurrencyRecords(vehicleMonthlyCosts(month)).forEach((item) => {
         const isPlannedVehicle = isPlannedVehicleCost(item);
         if (isPlannedVehicle && isVehiclePaymentPaid(item.id, month)) return;
         const converted = convert(item.amount, item.currency, targetCurrency, rate);
@@ -15960,20 +16232,21 @@
   }
 
   function monthTransactions(month, country) {
-    return state.transactions
+    return visibleCurrencyRecords(state.transactions)
       .filter((item) => item.date && item.date.slice(0, 7) === month)
       .filter((item) => country === "global" || item.country === country)
       .sort((a, b) => b.date.localeCompare(a.date));
   }
 
   function monthTransfers(month) {
+    if (isSingleCurrencyPlan()) return [];
     return state.transfers
       .filter((item) => item.date && item.date.slice(0, 7) === month)
       .sort((a, b) => b.date.localeCompare(a.date));
   }
 
   function monthWorkIncomes(month) {
-    return userWorkIncomes()
+    return visibleCurrencyRecords(userWorkIncomes())
       .filter((item) => item.paid !== false)
       .filter((item) => item.date && item.date.slice(0, 7) === month)
       .sort((a, b) => b.date.localeCompare(a.date));
@@ -16156,7 +16429,7 @@
   }
 
   function commitmentCalendarEntries(month, country) {
-    return (state.commitments || [])
+    return visibleCurrencyRecords(state.commitments || [])
       .filter((item) => item.active !== false)
       .filter((item) => country === "global" || item.country === country)
       .filter((item) => isCommitmentDueInMonth(item, month))
@@ -16247,7 +16520,7 @@
   }
 
   function housingCalendarEntries(month, country) {
-    return (state.housingCards || [])
+    return visibleCurrencyRecords(state.housingCards || [])
       .filter((card) => card.active !== false)
       .filter((card) => country === "global" || card.country === country)
       .map((card) => {
@@ -16276,7 +16549,7 @@
   }
 
   function housingCardMonthSummary(card, month) {
-    const rows = housingCardMonthRows(card, month).filter((item) => item.paymentMethod !== "company" || item.paid);
+    const rows = visibleCurrencyRecords(housingCardMonthRows(card, month)).filter((item) => item.paymentMethod !== "company" || item.paid);
     const currency = card.currency || primaryCurrency();
     const rate = latestRate(month);
     const total = rows.reduce((sumValue, item) => sumValue + convert(item.amount, item.currency, currency, rate), 0);
@@ -16349,7 +16622,7 @@
   }
 
   function debtCalendarEntries(month, country) {
-    return (state.debts || [])
+    return visibleCurrencyRecords(state.debts || [])
       .filter((item) => country === "global" || item.country === country)
       .filter((item) => isDebtActiveInMonth(item, month))
       .map((item) => {
@@ -16390,10 +16663,10 @@
   }
 
   function cardBillCalendarEntries(month, country) {
-    return (state.creditCards || [])
+    return planVisibleRecords(state.creditCards || [])
       .filter((card) => country === "global" || card.country === country)
       .map((card) => {
-        const bill = creditCardMonthBill(card, month);
+        const bill = creditCardMonthBill(card, month, { visibleOnly: true });
         const paid = isCardBillPaid(card.id, month);
         const dueDate = dateInMonth(month, card.dueDay || 1);
         const dueState = dueStateForDate(dueDate, paid);
@@ -16483,7 +16756,7 @@
       ...incomeCalendarEntries(month, country),
       ...wiseCalendarEntries(month, country)
     ];
-    return items.sort((a, b) => a.date.localeCompare(b.date) || a.title.localeCompare(b.title));
+    return visibleCurrencyRecords(items).sort((a, b) => a.date.localeCompare(b.date) || a.title.localeCompare(b.title));
   }
 
   function financialCalendarItems(month, country) {
@@ -16542,7 +16815,7 @@
   }
 
   function applyUnifiedFinancialStatuses(items, month) {
-    const transactions = (state.transactions || []).filter((item) => String(item.date || "").slice(0, 7) === month);
+    const transactions = monthTransactions(month, "global");
     return items.map((item) => {
       const matches = transactions
         .map((transaction) => ({ transaction, score: financialMatchScore(item, transaction) }))
@@ -16672,8 +16945,9 @@
     return (state.creditCards || []).find((card) => card.id === id);
   }
 
-  function creditCardMonthBill(card, month) {
-    const rows = cardPurchaseRowsForCard(card.id, month);
+  function creditCardMonthBill(card, month, { visibleOnly = false } = {}) {
+    const allRows = cardPurchaseRowsForCard(card.id, month);
+    const rows = visibleOnly ? allRows.filter(row => currencyVisible(row.rawCurrency, card.currency)) : allRows;
     const rate = latestRate(month);
     const purchaseTotal = rows.reduce((total, row) => total + convert(row.rawAmount, row.rawCurrency, card.currency, rate), 0);
     const manual = manualCardBill(card, month);
@@ -17082,7 +17356,7 @@
   }
 
   function monthSubscriptions(month, country) {
-    return (state.subscriptions || [])
+    return visibleCurrencyRecords(state.subscriptions || [])
       .filter((item) => item.active !== false)
       .filter((item) => country === "global" || item.country === country || (item.cardId && creditCardById(item.cardId)?.country === country))
       .filter((item) => isSubscriptionActiveInMonth(item, month))
@@ -17967,7 +18241,10 @@
     }
 
     const factoryFields = modalRoot.querySelector(".factory-source-fields");
-    if (select && factoryFields) factoryFields.classList.toggle("is-hidden", select.value !== "factory");
+    if (select && factoryFields) {
+      factoryFields.disabled = select.value !== "factory";
+      factoryFields.classList.toggle("is-hidden", factoryFields.disabled);
+    }
 
     const shiftSystem = modalRoot.querySelector("#shiftSystem");
     const nikoutai = modalRoot.querySelector(".factory-nikoutai-fields");
@@ -18134,7 +18411,7 @@
     if (!countrySelect) return;
     const country = countrySelect.value === "brasil" ? "brasil" : "japao";
     if (typeSelect) typeSelect.innerHTML = bankAccountTypeOptions(country, typeSelect.value);
-    if (currencySelect) currencySelect.value = countryMeta[country].currency;
+    if (currencySelect) currencySelect.value = isSingleCurrencyPlan() || firstAccessStage() === "bank" ? primaryCurrency() : countryMeta[country].currency;
     if (datalist) datalist.innerHTML = bankNameOptions(country);
   }
 
@@ -18149,6 +18426,20 @@
     if (accountSelect) accountSelect.innerHTML = bankAccountSelectOptions(country, accountSelect.value, "Sem conta vinculada");
     if (methodSelect) methodSelect.innerHTML = receiptMethodOptions(country, methodSelect.value, type);
     if (methodLabel) methodLabel.textContent = type === "income" ? "Modo de recebimento" : "Forma de pagamento";
+  }
+
+  function quickExpenseBankAccount(country, id) {
+    return activeBankAccounts().find(account => account.id === id && account.country === country);
+  }
+
+  function updateQuickExpenseCountryFields(form) {
+    const { country, currency, bankAccountId, paymentMethod } = form.elements;
+    const selectedCountry = country.value;
+    const account = quickExpenseBankAccount(selectedCountry, bankAccountId.value);
+    bankAccountId.innerHTML = bankAccountSelectOptions(selectedCountry, account?.id || "");
+    bankAccountId.value = account?.id || "";
+    paymentMethod.innerHTML = receiptMethodOptions(selectedCountry, paymentMethod.value, "expense");
+    currency.value = isSingleCurrencyPlan() ? primaryCurrency() : countryMeta[selectedCountry].currency;
   }
 
   function normalizeVehicleInsurancePaymentType(vehicle = {}) {
@@ -18280,11 +18571,12 @@
         };
       })
       : [];
-    return [...txs, ...cardPurchaseExpenseEntries(month, country), ...autoSubscriptions, ...vehicle, ...incomes].sort((a, b) => b.date.localeCompare(a.date));
+    return visibleCurrencyRecords([...txs, ...cardPurchaseExpenseEntries(month, country), ...autoSubscriptions, ...vehicle, ...incomes]).sort((a, b) => b.date.localeCompare(a.date));
   }
 
   function cardPurchaseExpenseEntries(month, country) {
-    const detailed = cardPurchaseRows(month, country).map((item) => {
+    const visibleCards = isSingleCurrencyPlan() ? new Set(planVisibleRecords(state.creditCards || []).map(card => card.id)) : null;
+    const detailed = cardPurchaseRows(month, country).filter(item => !visibleCards || (visibleCards.has(item.cardId) && currencyVisible(item.rawCurrency, item.currency))).map((item) => {
       const invoicePaid = Boolean(item.cardId && isCardBillPaid(item.cardId, month));
       return {
         ...item,
@@ -18300,7 +18592,7 @@
         icon: "C"
       };
     });
-    const manual = (state.creditCards || [])
+    const manual = planVisibleRecords(state.creditCards || [])
       .filter((card) => country === "global" || card.country === country)
       .filter((card) => isCardBillPaid(card.id, month))
       .map((card) => {
@@ -18314,7 +18606,7 @@
   }
 
   function categoryTotals(month, country) {
-    const currency = country === "brasil" ? "BRL" : primaryCurrency();
+    const currency = !isSingleCurrencyPlan() && country === "brasil" ? "BRL" : primaryCurrency();
     const rate = latestRate(month);
     const totals = new Map();
     monthTransactions(month, country).forEach((item) => {
@@ -18346,7 +18638,7 @@
       totals.set("Moradia", current + convert(item.amount, item.currency, currency, rate));
     });
     if (country === "global" || country === "japao") {
-      vehicleMonthlyCosts(month).forEach((item) => {
+      visibleCurrencyRecords(vehicleMonthlyCosts(month)).forEach((item) => {
         if (isPlannedVehicleCost(item) && isVehiclePaymentPaid(item.id, month)) return;
         const current = totals.get("Veiculo") || 0;
         totals.set("Veiculo", current + convert(item.amount, item.currency, currency, rate));
@@ -18844,7 +19136,7 @@
     const currency = sanitizeCurrency(account.currency, countryMeta[account.country]?.currency || primaryCurrency());
     let balance = balanceDate <= cutoff ? number(account.initialBalance) : 0;
     const applyMovement = (amount, movementCurrency, date, direction) => {
-      if (!date || date > cutoff) return;
+      if (!date || date > cutoff || !currencyVisible(movementCurrency, currency)) return;
       if (direction.force) {
         if (balanceDate > cutoff && String(date).slice(0, 7) !== month) return;
         if (balanceDate <= cutoff && date < balanceDate) return;
@@ -18886,13 +19178,13 @@
     const currency = sanitizeCurrency(account.currency, countryMeta[account.country]?.currency || primaryCurrency());
     const rate = latestRate(month);
     const sameMonth = (date) => String(date || "").slice(0, 7) === month;
-    const receivedFromTransactions = (state.transactions || [])
+    const receivedFromTransactions = visibleCurrencyRecords(state.transactions || [])
       .filter((item) => item.bankAccountId === account.id && item.type === "income" && sameMonth(item.date))
       .reduce((total, item) => total + convert(item.bankAmount ?? item.amount, item.currency, currency, rate), 0);
-    const paidFromTransactions = (state.transactions || [])
+    const paidFromTransactions = visibleCurrencyRecords(state.transactions || [])
       .filter((item) => item.bankAccountId === account.id && allOutflowTypes.includes(item.type) && item.affectsBankBalance !== false && sameMonth(item.date))
       .reduce((total, item) => total + convert(item.amount, item.currency, currency, rate), 0);
-    const workReceived = (state.workIncomes || [])
+    const workReceived = visibleCurrencyRecords(state.workIncomes || [])
       .filter((item) => item.bankAccountId === account.id && sameMonth(item.date))
       .filter((item) => item.paid !== false)
       .reduce((total, item) => total + convert(item.amount, item.currency, currency, rate), 0);
@@ -19135,8 +19427,75 @@
     return sanitizeCurrency(state?.settings?.baseCurrency, PRIMARY_CURRENCY);
   }
 
-  function secondaryCurrency() {
-    return sanitizeSecondaryCurrency(state?.settings?.secondaryCurrency, primaryCurrency());
+  function canChooseSecondaryCurrency() {
+    if (!remoteStore.enabled) return true;
+    const plan = commercialSnapshot()?.plan;
+    return plan === "pro" || plan === "family";
+  }
+
+  function visibleSecondaryCurrency() {
+    if (!canChooseSecondaryCurrency()) return "";
+    const { operationCountry, secondaryCurrencyMode, secondaryCurrency } = state.settings;
+    if (secondaryCurrencyMode === "off" || (operationCountry && secondaryCurrencyMode !== "enabled")) return "";
+    return sanitizeSecondaryCurrency(secondaryCurrency, primaryCurrency());
+  }
+
+  function secondaryCurrencyOptions(selected) {
+    return Object.entries(supportedCurrencies).filter(([code]) => code !== primaryCurrency())
+      .map(([code, meta]) => `<option value="${code}" ${selectedAttr(code, selected)}>${meta.label}</option>`).join("");
+  }
+
+  function setSecondaryCurrencyPreference(code, primary = primaryCurrency()) {
+    const currency = sanitizeCurrency(code, "");
+    if (!currency || currency === primary) {
+      state.settings.secondaryCurrencyMode = "off";
+      return;
+    }
+    state.settings.secondaryCurrencyMode = "enabled";
+    state.settings.secondaryCurrency = currency;
+  }
+
+  function maybePromptSecondaryCurrency() {
+    if (!remoteStore.enabled || remoteSession.status !== "ready" || !state.settings.firstAccessFinished
+      || !canChooseSecondaryCurrency() || state.settings.secondaryCurrencyMode || modalRoot.firstElementChild) return;
+    const [title, description, label, placeholder, skip, save] = ({
+      "en-US": ["Choose a second currency", "Keep your primary currency and show an equivalent amount in a second currency.", "Second currency", "Choose a currency", "Not now", "Save"],
+      "ja-JP": ["第2通貨を選択", "メイン通貨はそのままで、第2通貨での換算額を表示できます。", "第2通貨", "通貨を選択", "後で", "保存"]
+    })[activeLanguage()] || ["Escolha uma segunda moeda", "Mantenha sua moeda principal e veja o valor equivalente em outra moeda.", "Segunda moeda", "Selecione a moeda", "Agora não", "Salvar"];
+    modalRoot.innerHTML = `<div class="modal-backdrop"><section class="modal currency-choice-modal" role="dialog" aria-modal="true" aria-labelledby="secondary-currency-title">
+      <div class="modal-head"><h2 id="secondary-currency-title">${title}</h2></div>
+      <p>${description}</p>
+      <form class="form-grid" data-form="secondary-currency-choice"><div class="field"><label for="trialSecondaryCurrency">${label}</label><select id="trialSecondaryCurrency" name="currency" required><option value="">${placeholder}</option>${secondaryCurrencyOptions("")}</select></div>
+        <div class="form-actions"><button class="secondary-button" type="submit" value="skip" formnovalidate>${skip}</button><button class="primary-button" type="submit">${save}</button></div></form></section></div>`;
+    const form = modalRoot.querySelector("form");
+    const controls = [...form.querySelectorAll("select, button")];
+    controls[0].focus();
+    form.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        saveSecondaryCurrencyChoice(form, true);
+      } else if (event.key === "Tab" && event.shiftKey && document.activeElement === controls[0]) {
+        event.preventDefault();
+        controls.at(-1).focus();
+      } else if (event.key === "Tab" && !event.shiftKey && document.activeElement === controls.at(-1)) {
+        event.preventDefault();
+        controls[0].focus();
+      }
+    });
+  }
+
+  function saveSecondaryCurrencyChoice(form, skip) {
+    if (!canChooseSecondaryCurrency()) {
+      closeModal();
+      render();
+      return;
+    }
+    const currency = form.elements.currency.value;
+    if (!skip && (!sanitizeCurrency(currency, "") || currency === primaryCurrency())) return;
+    setSecondaryCurrencyPreference(skip ? "" : currency);
+    saveState({ remoteNow: true });
+    closeModal();
+    render();
   }
 
   function sanitizeCurrency(currency, fallback = PRIMARY_CURRENCY) {
@@ -19199,10 +19558,16 @@
   function formatMoneyWithPrimary(value, currency, month = state.ui.selectedMonth) {
     const originalCurrency = sanitizeCurrency(currency, primaryCurrency());
     const original = formatMoney(value, originalCurrency);
-    const comparisonCurrency = originalCurrency === primaryCurrency() ? secondaryCurrency() : primaryCurrency();
-    if (!comparisonCurrency || comparisonCurrency === originalCurrency) return original;
-    const converted = convert(value, originalCurrency, comparisonCurrency, latestRate(month));
-    return `${original} <small class="money-converted">(${formatMoney(converted, comparisonCurrency)})</small>`;
+    const comparison = formatMoneyComparison(value, originalCurrency, month);
+    return comparison ? `${original} <small class="money-converted">(${comparison})</small>` : original;
+  }
+
+  function formatMoneyComparison(value, currency, month) {
+    const secondary = visibleSecondaryCurrency();
+    if (!secondary) return "";
+    const source = sanitizeCurrency(currency, primaryCurrency());
+    const target = source === primaryCurrency() ? secondary : primaryCurrency();
+    return formatMoney(convert(value, source, target, latestRate(month)), target);
   }
 
   function formatMoney(value, currency) {
@@ -19237,6 +19602,7 @@
     const currentPrimary = primaryCurrency();
     const nonPrimary = totals.filter((item) => item.currency !== currentPrimary && item.amount > 0);
     const primary = totals.find((item) => item.currency === currentPrimary);
+    if (isSingleCurrencyPlan()) return formatMoney(primary?.amount || 0, currentPrimary);
 
     if (nonPrimary.length === 1 && (!primary || !primary.amount)) {
       const item = nonPrimary[0];
@@ -19428,7 +19794,7 @@
 
   function commercialPlanLabel(plan) {
     const verified = remoteSession.commercialAccess?.userId === remoteSession.user?.id ? remoteSession.commercialAccess?.plan : null;
-    return ({ free: "Gratis", pro: "PRO", family: "Familia" })[verified] || "A validar";
+    return ({ free: "Single", pro: "PRO", family: "Familia" })[verified] || "A validar";
   }
 
   async function copyReferralCode() {
@@ -19771,11 +20137,11 @@
 
   function searchableFinancialItems() {
     const rows = [];
-    const add = (collection, tab, label, items, title, detail) => (items || []).forEach((item) => rows.push({ collection, tab, label, item, title: title(item), detail: detail(item) }));
+    const add = (collection, tab, label, items, title, detail) => visibleCurrencyRecords(items || []).forEach((item) => rows.push({ collection, tab, label, item, title: title(item), detail: detail(item) }));
     add("transactions", "reports", "Lancamento", state.transactions, (i) => i.title || "Lancamento", (i) => `${i.date || ""} ${i.category || ""} ${formatMoney(i.amount, i.currency)}`);
     add("receipts", "reports", "Recibo", state.receipts, (i) => i.merchant || "Recibo", (i) => `${i.date || ""} ${i.category || ""} ${formatMoney(i.amount, i.currency)}`);
     add("commitments", "accounts", "Conta", state.commitments, (i) => i.title || i.provider || "Conta", (i) => `${i.category || ""} dia ${i.dueDay || ""}`);
-    add("creditCards", "cards", "Fatura", state.creditCards, (i) => i.nickname || i.issuer || "Cartao", (i) => `Fatura dia ${i.dueDay || ""}`);
+    add("creditCards", "cards", "Fatura", planVisibleRecords(state.creditCards || []), (i) => i.nickname || i.issuer || "Cartao", (i) => `Fatura dia ${i.dueDay || ""}`);
     add("financialGoals", "wealth", "Meta", state.financialGoals, (i) => i.title || "Meta", (i) => `${i.targetDate || ""} ${formatMoney(i.targetAmount, i.currency)}`);
     add("subscriptions", "budgets", "Assinatura", state.subscriptions, (i) => i.name || i.title || "Assinatura", (i) => `${formatMoney(i.amount, i.currency)} ${i.billingCycle || ""}`);
     return rows;

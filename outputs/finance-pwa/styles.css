@@ -11915,6 +11915,22 @@ html.auth-mode { background: #f3f7f4; }
 body.auth-mode { background: #f3f7f4; color: #173d32; min-height: 100dvh; isolation: isolate; }
 body.auth-mode::before { content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none; background: #f3f7f4 url("./assets/login-landscape.png") center bottom / cover no-repeat; }
 .auth-mode .app-shell { width: 100%; max-width: none; padding: 0; min-height: 100dvh; }
+.first-access-shell { display: grid; place-items: center; min-height: 100dvh; padding: 24px 16px; }
+.first-access-card { position: relative; isolation: isolate; overflow: hidden; display: grid; gap: 12px; width: min(100%, 420px); padding: 24px; border: 1px solid #c8d8d0; border-radius: 8px; background: #fdfefa; color: #173d32; box-shadow: 0 14px 48px #172d2226; }
+.first-access-card h2, .first-access-card p { margin: 0; overflow-wrap: anywhere; }
+.first-access-card .field select { width: 100%; min-height: 44px; color: #173d32; background: #fff; border: 1px solid #93ada1; }
+.first-access-card .primary-button { min-height: 44px; }
+.currency-choice-modal { max-width: min(100%, 440px); }
+.currency-choice-modal > p { margin: 0 0 16px; line-height: 1.5; }
+.currency-choice-modal .form-actions button { min-height: 44px; }
+.first-access-confetti { position: absolute; inset: 0; z-index: -1; pointer-events: none; }
+.first-access-confetti i { position: absolute; top: 0; left: var(--x); width: 7px; height: 11px; background: hsl(var(--hue) 68% 56%); opacity: 0; animation: first-access-confetti 1.15s var(--delay) ease-out both; }
+@keyframes first-access-confetti {
+  0% { transform: translateY(-14px) rotate(0); opacity: 0; }
+  15% { opacity: .85; }
+  100% { transform: translateY(230px) rotate(var(--turn)); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .first-access-confetti { display: none; } }
 .auth-mode .main-view { display: block; padding: 0; margin: 0; }
 .auth-mode .auth-panel { display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; width: 100%; min-height: 100dvh; margin: 0; padding: 100px 24px max(40px, env(safe-area-inset-bottom)); box-sizing: border-box; }
 .auth-mode .auth-visual { display: none; }
@@ -12098,7 +12114,7 @@ body[data-workspace-theme] .tab-card-columns .content-panel {
     bottom: 18px;
     left: 18px;
     display: grid;
-    grid-template-rows: auto 1fr auto;
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
     width: 82px;
     padding: 12px 8px;
     border: 1px solid rgba(255, 255, 255, 0.09);
@@ -12127,11 +12143,33 @@ body[data-workspace-theme] .tab-card-columns .content-panel {
     display: none;
   }
 
+  .desktop-prototype-add {
+    display: grid;
+    place-items: center;
+    justify-self: center;
+    width: 44px;
+    height: 44px;
+    margin-top: 12px;
+    padding: 0;
+    border: 0;
+    border-radius: 8px;
+    color: #17352b;
+    background: #daf58b;
+    cursor: pointer;
+  }
+
+  .desktop-prototype-add:hover { background: #edffc2; }
+  .desktop-prototype-add:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+  .desktop-prototype-add svg { width: 23px; height: 23px; }
+
   .desktop-prototype-links {
     display: grid;
-    align-content: center;
+    align-content: safe center;
+    grid-auto-rows: max-content;
     gap: 4px;
-    margin: 18px 0;
+    margin: 10px 0;
+    overflow-y: auto;
+    scrollbar-width: thin;
   }
 
   .desktop-prototype-links button,
@@ -12595,6 +12633,7 @@ body[data-workspace-theme] .tab-card-columns .content-panel {
 .smart-earned-medals > div { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .smart-earned-medals > div > span { display: inline-flex; align-items: center; gap: 5px; padding: 6px 8px; border: 1px solid color-mix(in srgb, var(--theme-secondary, var(--green)), transparent 72%); border-radius: 999px; background: color-mix(in srgb, var(--theme-secondary, var(--green)), transparent 88%); font-size: .55rem; font-weight: 850; }
 .smart-earned-medals svg { width: 12px; height: 12px; }
+.smart-earned-medals time { font-weight: 600; color: var(--muted); }
 .smart-earned-medals small { color: var(--muted); font-size: .58rem; }
 .smart-profile-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .smart-profile-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 0; }
@@ -13253,3 +13292,5 @@ body[data-workspace-theme] .tab-card-columns .content-panel {
 .referral-rules { padding-left: 20px; font-size: 14px; line-height: 1.7; }
 .referral-rules li + li { margin-top: 10px; }
 .commercial-page button:disabled { opacity: .55; cursor: not-allowed; }
+.factory-source-fields { min-inline-size: 0; margin: 0; padding: 0; border: 0; }
+.workspace-metrics.workspace-metrics-single { grid-template-columns: minmax(0, 1fr); }

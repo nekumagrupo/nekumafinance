@@ -1,16 +1,16 @@
-const CACHE_NAME = "nekuma-finance-v289";
+const CACHE_NAME = "nekuma-finance-v300";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./home.css?v=287",
-  "./home.js?v=287",
+  "./home.js?v=300",
   "./assets/home-family-japan.webp",
   "./app.html",
   "./privacy.html",
   "./terms.html",
   "./clean.html",
-  "./styles.css?v=289",
-  "./app.js?v=289",
+  "./styles.css?v=298",
+  "./app.js?v=300",
   "./i18n.js?v=266",
   "./metamask.js?v=212",
   "./binance.js?v=212",

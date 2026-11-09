@@ -1,0 +1,57 @@
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const vm = require("node:vm");
+
+const app = fs.readFileSync("outputs/finance-pwa/app.js", "utf8");
+const stageSource = app.slice(app.indexOf("  function firstAccessStage()"), app.indexOf("  async function saveFirstAccess("));
+const operations = app.match(/const operationCurrencies = [^;]+;/)[0];
+const pendingBankSource = app.slice(app.indexOf("  function pendingFirstAccessBank("), app.indexOf("  function mergeCollectionWithLocal("));
+const user = { id: "new-user", user_metadata: {} };
+const remoteSession = { user, householdMembers: [{ userId: user.id, role: "owner" }] };
+const state = { settings: {} };
+let accounts = [];
+let sources = [];
+const context = vm.createContext({ remoteSession, state, activeBankAccounts: () => accounts, userIncomeSources: () => sources, languageSetupRequired: true });
+const stage = vm.runInContext(`${operations}\n${stageSource}\nauthenticatedScreen`, context);
+
+assert.equal(stage(), "languageSetup", "Existing accounts retain the old language flow");
+user.user_metadata.nekuma_first_access = 1;
+assert.equal(stage(), "setup");
+user.user_metadata.nekuma_operation_configured = true;
+assert.equal(stage(), "welcome", "Saved setup resumes at welcome");
+user.user_metadata.nekuma_welcome_seen = true;
+assert.equal(stage(), "bank", "Closing before the first account keeps the bank step pending");
+context.languageSetupRequired = false;
+accounts = [{ id: "bank" }];
+assert.equal(stage(), "income", "Returning after saving the bank resumes at income");
+sources = [{ id: "work" }];
+assert.equal(stage(), "medal", "Returning after saving income resumes at the medal");
+state.settings.firstAccessFinished = true;
+accounts = [];
+assert.equal(stage(), "ready", "Deleting the bank later does not restart onboarding");
+state.settings.firstAccessFinished = false;
+remoteSession.householdMembers.push({ userId: "other-user", role: "member" });
+assert.equal(stage(), "ready", "Shared households are not reconfigured");
+assert.equal(vm.runInContext("JSON.stringify(operationCurrencies)", context), '{"japao":"JPY","brasil":"BRL","other":"USD"}');
+
+const recoverBank = vm.runInContext(`${pendingBankSource}\npendingFirstAccessBank`, context);
+const bank = { id: "bank", createdBy: user.id };
+const local = { ui: { firstAccessPendingBankId: bank.id }, bankAccounts: [bank] };
+const remote = { settings: {}, bankAccounts: [] };
+assert.equal(recoverBank(remote, local, {}, user), bank, "Pending bank survives reload before sync");
+assert.equal(recoverBank(remote, local, { bankAccounts: { bank: "deleted" } }, user), null);
+assert.equal(recoverBank({ ...remote, bankAccounts: [bank] }, local, {}, user), null);
+assert.equal(recoverBank(remote, local, {}, { ...user, id: "other-user" }), null);
+assert.equal(recoverBank({ ...remote, settings: { firstAccessFinished: true } }, local, {}, user), null);
+
+const noticeSource = app.slice(app.indexOf("  function proTrialCopy()"), app.indexOf("  async function activateProTrial("));
+const noticeContext = vm.createContext({ activeLanguage: () => "pt-BR", localDateKey: () => "2026-11-09" });
+const trialNotice = vm.runInContext(`${noticeSource}\nproTrialExpiryNotice`, noticeContext);
+const end = Date.parse("2026-11-10T12:00:00Z");
+const trial = { plan: "pro", status: "trialing", trialEndsAt: new Date(end).toISOString() };
+assert.equal(trialNotice(trial, end - 86400001), null);
+assert.equal(trialNotice(trial, end - 86400000).id, `pro-trial-ending:${end}`);
+assert.equal(trialNotice(trial, end), null);
+assert.equal(trialNotice({ ...trial, plan: "free" }, end - 1000), null);
+assert.equal(trialNotice({ ...trial, status: "active" }, end - 1000), null);
+console.log("PASS: first access, pending bank recovery, currency suggestions and final-day trial notice.");
