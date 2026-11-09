@@ -15,7 +15,7 @@ const {PGlite}=require(path.resolve(process.env.PGLITE_MODULE || 'tmp/commercial
       create table auth.users(id uuid primary key,email text,encrypted_password text default '',created_at timestamptz default now(),updated_at timestamptz,last_sign_in_at timestamptz,email_confirmed_at timestamptz,raw_user_meta_data jsonb default '{}');
       create table public.households(id uuid primary key default gen_random_uuid(),name text default 'Familia',invite_code text not null unique default upper(replace(gen_random_uuid()::text,'-','')));
       create table public.household_members(household_id uuid references public.households(id) on delete cascade,user_id uuid references auth.users(id) on delete cascade,role text,created_at timestamptz default now(),primary key(household_id,user_id));
-      create table public.app_states(household_id uuid primary key references public.households(id) on delete cascade,state jsonb);
+      create table public.app_states(household_id uuid primary key references public.households(id) on delete cascade,state jsonb,updated_by uuid,updated_at timestamptz);
     `);
     await db.exec(fs.readFileSync('outputs/finance-pwa/supabase-commercial-v1.sql','utf8'));
     await db.exec(fs.readFileSync('outputs/finance-pwa/supabase-admin-management-v2.sql','utf8'));
@@ -51,6 +51,11 @@ const {PGlite}=require(path.resolve(process.env.PGLITE_MODULE || 'tmp/commercial
     }
     await db.exec(fs.readFileSync('scripts/test-pro-trial-opt-in-staging.sql','utf8'));
     await db.exec(fs.readFileSync('scripts/test-single-currency-staging.sql','utf8'));
+    const updateFirst=fs.readFileSync('outputs/finance-pwa/supabase-app-state-update-first-v22.sql','utf8');
+    await db.exec(updateFirst);
+    await db.exec(updateFirst);
+    await db.exec(fs.readFileSync('scripts/test-app-state-update-first-staging.sql','utf8'));
+    console.log('PASS: reproduced legacy upsert failure; real save RPC preserves foreign history and enforces Single and writer restrictions.');
     assert.equal((await db.query('select count(*)::integer as count from auth.users')).rows[0].count,1);
     assert.equal((await db.query('select trial_offer_available from public.commercial_subscriptions')).rows[0].trial_offer_available,false);
     console.log('PASS: manual trial and Single currency enforcement in disposable PostgreSQL; legacy account unchanged.');
