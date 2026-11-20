@@ -4860,7 +4860,8 @@
       ${breakdown ? `<small>${breakdown.actualDays ? "Escala com apontamentos" : "Previsao pela escala"} · Fechamento ${formatShortDate(breakdown.periodEnd)}</small>` : ""}
       <dl>${grossRows.map(([label, hours, value]) => `<div><dt>${label}${hours ? ` (${number(hours).toFixed(2)}h)` : ""}</dt><dd>${formatMoney(value, card.currency)}</dd></div>`).join("")}${number(card.bonus) > 0 ? `<div><dt>Bonus</dt><dd>${formatMoney(card.bonus, card.currency)}</dd></div>` : ""}<div class="salary-detail-total"><dt>Salario bruto</dt><dd>${formatMoney(card.amount, card.currency)}</dd></div></dl>
       ${deductionRows.length ? `<dl>${deductionRows.map((item) => `<div><dt>${escapeHtml(item.label)}</dt><dd>- ${formatMoney(item.amount, card.currency)}</dd></div>`).join("")}<div class="salary-detail-total"><dt>Total de descontos</dt><dd>- ${formatMoney(card.deductions.total, card.currency)}</dd></div></dl>` : `<p class="row-meta">Nenhum desconto salarial configurado.</p>`}
-      <div class="salary-detail-net"><span>Liquido previsto</span><strong>${formatMoney(net, card.currency)}</strong></div>`;
+      <div class="salary-detail-net"><span>Liquido previsto</span><strong>${formatMoney(net, card.currency)}</strong></div>
+      <p class="salary-tax-notice"><strong>Atencao:</strong> Os impostos nao sao calculados automaticamente. Descontos de impostos nao informados manualmente nao estao incluidos nesta previsao. Confira o liquido no holerite.</p>`;
     if (options.popover) {
       return `<div class="salary-detail-popover salary-prediction-breakdown" id="${escapeAttr(options.id || "salary-detail-popover")}" role="tooltip"><strong class="salary-detail-popover-title">Detalhamento do salário previsto</strong>${body}</div>`;
     }
@@ -8307,6 +8308,13 @@
 
   function renderEmergencyReservePanel(summary = summarizeMonth(state.ui.selectedMonth, "global")) {
     const goal = emergencyGoal();
+    if (!goal) return `
+      <div class="panel-head"><h2>Reserva de emergencia</h2></div>
+      <div class="empty-state">
+        <p>Nenhuma reserva cadastrada.</p>
+        <button class="small-action" type="button" data-action="open-modal" data-modal="emergencyReserve">Criar reserva</button>
+      </div>
+    `;
     const currency = primaryCurrency();
     const reserve = emergencyReserveStats(goal, summary);
     const target = reserve.target;

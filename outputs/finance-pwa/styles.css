@@ -10685,6 +10685,7 @@ h1 {
 .salary-breakdown dl { margin: 8px 0; }
 .salary-breakdown dl > div { display: flex; justify-content: space-between; gap: 10px; padding: 4px 0; flex-wrap: wrap; }
 .salary-breakdown dd { margin: 0; font-weight: 700; }
+.salary-tax-notice { margin: 12px 0 0; padding: 10px 12px; border-left: 3px solid #b42318; background: #fff1f0; color: #9b1c13; font-size: .875rem; line-height: 1.5; overflow-wrap: anywhere; }
 .salary-prediction-breakdown > small { display: block; margin-bottom: 6px; color: rgba(18, 49, 79, .62); font-size: .66rem; }
 .salary-prediction-breakdown dl + dl { margin-top: 10px; padding-top: 8px; border-top: 1px solid rgba(18, 49, 79, .14); }
 .salary-prediction-breakdown .salary-detail-total { margin-top: 4px; padding-top: 7px; border-top: 1px solid rgba(18, 49, 79, .14); color: #12314f; font-weight: 850; }
