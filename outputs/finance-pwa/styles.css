@@ -9733,6 +9733,11 @@ h1 {
   .workspace-card-head strong { display: grid; min-width: 21px; height: 21px; padding: 0 6px; place-items: center; border-radius: 999px; color: var(--theme-button-text); background: var(--workspace-accent); font-size: .58rem; }
   .workspace-card-head button { display: grid; width: 30px; height: 30px; place-items: center; border: 1px solid color-mix(in srgb, var(--theme-ink), transparent 82%); border-radius: 50%; color: var(--theme-text); background: transparent; }
   .workspace-card-head button svg { width: 14px; height: 14px; }
+  .workspace-subscriptions-card .workspace-card-head .workspace-subscription-manage {
+    width: auto;
+    padding: 0 9px;
+    border-radius: 999px;
+  }
   .workspace-accounts-card { grid-area: accounts; }
   .workspace-account-list { display: grid; gap: 2px; margin-top: 9px; }
   .workspace-account-row { display: grid; grid-template-columns: 31px minmax(0,1fr) auto; align-items: center; gap: 8px; width: 100%; padding: 8px 0; border: 0; border-bottom: 1px solid color-mix(in srgb, var(--theme-ink), transparent 90%); color: inherit; background: transparent; text-align: left; }

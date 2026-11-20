@@ -96,6 +96,7 @@
       futsu: "Futsu - conta normal",
       savings: "Poupanca",
       salary: "Conta salario",
+      wallet: "Carteira digital / app de dinheiro",
       other: "Outro"
     },
     brasil: {
@@ -103,6 +104,7 @@
       savings: "Poupanca",
       salary: "Conta salario",
       payment: "Conta pagamento",
+      wallet: "Carteira digital / app de dinheiro",
       other: "Outro"
     }
   };
@@ -460,7 +462,7 @@
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./service-worker.js?v=307")
+      navigator.serviceWorker.register("./service-worker.js?v=309")
         .then((registration) => registration.update().catch(() => {}))
         .catch(() => {});
     });
@@ -877,6 +879,7 @@
       event.target.form.elements.currency.value = operationCurrencies[event.target.value] || "";
     }
     if (event.target.id === "bankAccountCountry") updateBankAccountCountryFields();
+    if (event.target.id === "bankAccountType") updateBankAccountProviderFields();
     if (event.target.name === "country" && event.target.form?.dataset.form === "quick-expense") updateQuickExpenseCountryFields(event.target.form);
     if (event.target.id === "country" && event.target.closest("[data-form='transaction']")) updateTransactionBankFields();
     if (event.target.id === "type" && event.target.closest("[data-form='transaction']")) updateTransactionBankFields();
@@ -4312,7 +4315,10 @@
                 <h2>Subscricoes atuais</h2>
                 <p class="panel-total">Total a pagar ${subscriptionMonthTotalLabel(state.ui.selectedMonth)}</p>
               </div>
-              <button class="small-action icon-action" type="button" data-action="open-modal" data-modal="subscription" aria-label="Nova subscricao">+</button>
+              <div class="chips">
+                <button class="small-action ghost" type="button" data-action="open-modal" data-modal="manageSubscriptions">Gerenciar</button>
+                <button class="small-action icon-action" type="button" data-action="open-modal" data-modal="subscription" aria-label="Nova subscricao">+</button>
+              </div>
             </div>
             ${renderSubscriptionsHomePanel()}
           </section>
@@ -4501,7 +4507,7 @@
   }
 
   function renderWorkspaceAccountsCard(hideBalance) {
-    const accounts = activeBankAccounts().slice(0, 6);
+    const accounts = activeBankAccounts();
     return `
       <article class="workspace-fixed-card workspace-accounts-card">
         <div class="workspace-card-head"><div><span>Contas</span><strong>${accounts.length}</strong></div><button type="button" data-action="set-tab" data-tab="accounts" aria-label="Abrir Banking"><i data-lucide="sliders-horizontal" aria-hidden="true"></i></button></div>
@@ -4509,11 +4515,12 @@
           ${accounts.length ? accounts.map((account) => {
             const country = countryMeta[account.country] || countryMeta.japao;
             const balance = bankAccountBalance(account, state.ui.selectedMonth);
-            const bankLogo = bankLogoAsset(account);
+            const wallet = account.accountType === "wallet";
+            const bankLogo = wallet ? null : bankLogoAsset(account);
             return `
               <button type="button" data-action="set-tab" data-tab="accounts" class="workspace-account-tile" ${bankAccountStyleAttrs(account)} aria-label="Abrir conta ${escapeAttr(bankAccountName(account))}">
                 <span class="workspace-account-bank" aria-hidden="true">
-                  <span>${escapeHtml(country.short || "BK")}</span>
+                  <span>${wallet ? "APP" : escapeHtml(country.short || "BK")}</span>
                   ${bankLogo ? `<img src="./assets/banks/logos/${escapeAttr(bankLogo.file)}?v=252" alt="" onerror="this.hidden=true" />` : ""}
                 </span>
                 <strong>${escapeHtml(bankAccountName(account))}</strong>
@@ -4530,7 +4537,12 @@
     const subscriptions = monthSubscriptions(state.ui.selectedMonth, "global").filter((item) => isSubscriptionDueInMonth(item, state.ui.selectedMonth));
     return `
       <article class="workspace-fixed-card workspace-subscriptions-card">
-        <div class="workspace-card-head"><div><span>Subscricoes</span><strong>${subscriptions.length}</strong></div><button type="button" data-action="open-modal" data-modal="subscription" aria-label="Adicionar subscricao"><i data-lucide="plus" aria-hidden="true"></i></button></div>
+        <div class="workspace-card-head"><div><span>Subscricoes</span><strong>${subscriptions.length}</strong></div>
+          <div class="chips">
+            <button class="workspace-subscription-manage" type="button" data-action="open-modal" data-modal="manageSubscriptions">Gerenciar</button>
+            <button type="button" data-action="open-modal" data-modal="subscription" aria-label="Adicionar subscricao"><i data-lucide="plus" aria-hidden="true"></i></button>
+          </div>
+        </div>
         <div class="workspace-subscription-summary"><strong>${subscriptionMonthTotalLabel(state.ui.selectedMonth)}</strong><span>Total previsto no mes</span></div>
         <div class="workspace-subscription-names">${subscriptions.slice(0, 3).map((item) => `<span>${renderSubscriptionLogo(item, "subscription-logo workspace-subscription-logo")}<b>${escapeHtml(subscriptionName(item))}</b></span>`).join("") || `<small>Nenhuma subscricao neste mes.</small>`}</div>
       </article>
@@ -5186,7 +5198,7 @@
       <div class="detail-page-shell">
         ${renderPageIntro("Banking", "Contas e rendas", "Cadastre onde o dinheiro entra, acompanhe saldos e mantenha o vinculo entre empresa, salario e conta de recebimento.", `<button class="secondary-button" type="button" data-action="open-modal" data-modal="incomeSource">Nova empresa</button><button class="primary-button" type="button" data-action="open-modal" data-modal="bankAccount">Nova conta</button>`)}
         <section class="detail-kpi-grid"><article><span>Contas ativas</span><strong>${accounts.length}</strong><small>Japao e Brasil</small></article><article><span>Fontes de renda</span><strong>${incomeSources.length}</strong><small>empresas e trabalhos</small></article><article><span>Saldo bancario</span><strong>${formatMoney(bankAccountsTotal(primaryCurrency(), state.ui.selectedMonth), primaryCurrency())}</strong><small>consolidado</small></article><article><span>Recebimentos</span><strong>${monthWorkIncomes(state.ui.selectedMonth).length}</strong><small>${formatMonthLabel(state.ui.selectedMonth)}</small></article></section>
-        <section class="content-panel bank-accounts-panel"><div class="panel-head"><div><h2>Contas bancarias</h2><p class="row-meta">Saldos, banco, pais e conta principal.</p></div><button class="small-action" type="button" data-action="open-modal" data-modal="bankAccount">Nova conta</button></div>${renderBankAccountsPanel()}</section>
+        <section class="content-panel bank-accounts-panel"><div class="panel-head"><div><h2>Contas bancárias e carteiras</h2><p class="row-meta">Saldos, país e conta principal.</p></div><div class="chips"><button class="small-action ghost" type="button" data-action="open-modal" data-modal="bankAccount" data-id="new:wallet">Adicionar carteira digital</button><button class="small-action" type="button" data-action="open-modal" data-modal="bankAccount">Nova conta</button></div></div>${renderBankAccountsPanel()}</section>
         <section class="detail-two-column"><article class="content-panel"><div class="panel-head"><div><h2>Empresas e rendas</h2><p class="row-meta">A conta de recebimento e obrigatoria para salarios.</p></div><button class="small-action" type="button" data-action="open-modal" data-modal="incomeSource">Cadastrar</button></div>${renderIncomeSourcesSettingsPanel()}</article><article class="content-panel"><div class="panel-head"><h2>Pagamentos do mes</h2><button class="small-action" type="button" data-action="open-modal" data-modal="workIncome">Recebimento</button></div>${renderIncomePaymentsPanel(null)}</article></section>
         ${renderWise()}
       </div>
@@ -7561,12 +7573,13 @@
     return brand;
   }
 
-  function renderSubscriptionsPanel(limit) {
+  function renderSubscriptionsPanel(limit, includeAll = false) {
     const month = state.ui.selectedMonth;
-    const subscriptions = monthSubscriptions(month, "global");
+    const monthly = monthSubscriptions(month, "global");
+    const subscriptions = includeAll ? (state.subscriptions || []) : monthly;
     const visible = limit ? subscriptions.slice(0, limit) : subscriptions;
     const totalCurrency = primaryCurrency();
-    const payableSubscriptions = subscriptions.filter((item) => isSubscriptionDueInMonth(item, month));
+    const payableSubscriptions = monthly.filter((item) => isSubscriptionDueInMonth(item, month));
     const total = payableSubscriptions.reduce((sumValue, item) => {
       return sumValue + convert(item.amount, item.currency, totalCurrency, latestRate(month));
     }, 0);
@@ -7577,7 +7590,7 @@
 
     return `
       <div class="subscription-summary">
-        <p class="mini-label">${subscriptions.length} ativa${subscriptions.length === 1 ? "" : "s"} no mes · ${payableSubscriptions.length} vencendo</p>
+        <p class="mini-label">${monthly.length} ativa${monthly.length === 1 ? "" : "s"} no mes · ${payableSubscriptions.length} vencendo</p>
         <strong>${formatMoney(total, totalCurrency)}</strong>
       </div>
       ${limit ? `
@@ -7619,9 +7632,9 @@
                 <div class="row-amount expense">
                   ${subscriptionAmountLabel(item, month)}
                   <div class="row-actions">
-                    ${!billable || autoPaid || paid ? "" : `<button class="small-action" type="button" data-action="open-modal" data-modal="monthlyPayment" data-payment-id="subscription:${item.id}">Pagar</button>`}
-                    <button class="small-action ghost" type="button" data-action="open-modal" data-modal="subscription" data-id="${item.id}">Editar</button>
-                    <button class="small-action ghost" type="button" data-action="delete-subscription" data-id="${item.id}">Excluir</button>
+                    ${includeAll || !billable || autoPaid || paid ? "" : `<button class="small-action" type="button" data-action="open-modal" data-modal="monthlyPayment" data-payment-id="subscription:${item.id}">Pagar</button>`}
+                    ${currencyVisible(item.currency) ? `<button class="small-action ghost" type="button" data-action="open-modal" data-modal="subscription" data-id="${escapeAttr(item.id)}">Editar</button>` : ""}
+                    <button class="small-action ghost" type="button" data-action="delete-subscription" data-id="${escapeAttr(item.id)}">Excluir</button>
                   </div>
                 </div>
               </div>
@@ -9739,7 +9752,7 @@
       nubankBoxContribution: renderNubankBoxContributionModal,
       creditCard: renderCreditCardModal,
       cardPurchase: renderCardPurchaseModal,
-      bankAccount: renderBankAccountModal,
+      bankAccount: item => renderBankAccountModal(item, id === "new:wallet"),
       goal: renderFinancialGoalModal,
       emergencyReserve: renderEmergencyReserveModal,
       goalContribution: renderGoalContributionModal,
@@ -9762,6 +9775,8 @@
       salaryDetails: renderSalaryDetailsModal,
       monthlyPayment: renderMonthlyPaymentModal,
       subscription: renderSubscriptionModal,
+      manageSubscriptions: () => `<div class="modal-head"><h2>Gerenciar subscrições</h2>
+        <button class="close-button" type="button" data-action="close-modal" aria-label="Fechar">x</button></div>${renderSubscriptionsPanel(null, true)}`,
       categoryBudget: renderCategoryBudgetModal,
       projectionScenario: renderProjectionScenarioModal,
       workspaceTheme: renderWorkspaceThemeModal,
@@ -11237,17 +11252,18 @@
     `;
   }
 
-  function renderBankAccountModal(item = null) {
+  function renderBankAccountModal(item = null, newWallet = false) {
     const firstBank = !item && firstAccessStage() === "bank";
     const activeCountry = item?.country || (firstBank ? state.settings.operationCountry : state.ui.activeCountry);
     const country = activeCountry === "brasil" ? "brasil" : "japao";
     const selectedCurrency = item?.currency || (firstBank ? primaryCurrency() : countryMeta[country].currency);
-    const selectedType = item?.accountType || defaultBankAccountType(country);
+    const selectedType = item?.accountType || (newWallet ? "wallet" : defaultBankAccountType(country));
+    const wallet = selectedType === "wallet";
     const balanceDate = item?.balanceDate || dateInMonth(state.ui.selectedMonth || currentMonth(), new Date().getDate());
     const nextColor = sanitizeColor(item?.color, bankAccountColors[activeBankAccounts().length % bankAccountColors.length]);
     return `
       <div class="modal-head">
-        <h2>${item ? "Editar conta bancaria" : "Nova conta bancaria"}</h2>
+        <h2>${wallet ? (item ? "Editar carteira digital" : "Nova carteira digital") : (item ? "Editar conta bancaria" : "Nova conta bancaria")}</h2>
         <button class="close-button" type="button" data-action="close-modal" aria-label="Fechar">x</button>
       </div>
       <form class="form-grid" data-form="bank-account">
@@ -11269,11 +11285,12 @@
         </div>
         <div class="two-cols">
           <div class="field">
-            <label for="bankName">Banco</label>
-            <input id="bankName" name="bankName" required list="bankNameOptions" placeholder="Ex: Yuucho, Nubank" value="${escapeAttr(item?.bankName || "")}" />
+            <label for="bankName">${wallet ? "Nome do app" : "Banco"}</label>
+            <input id="bankName" name="bankName" required list="bankNameOptions" placeholder="${wallet ? "Ex: PayPay, Mercari" : "Ex: Yuucho, Nubank"}" value="${escapeAttr(item?.bankName || "")}" />
             <datalist id="bankNameOptions">
-              ${bankNameOptions(country)}
+              ${bankNameOptions(country, selectedType)}
             </datalist>
+            <p class="row-meta" id="walletBalanceHelp" ${wallet ? "" : "hidden"}>Informe o saldo do app na data escolhida. Registre vendas e gastos vinculados à carteira para atualizar o saldo no Nekuma.</p>
           </div>
           <div class="field">
             <label for="bankAccountNickname">Apelido</label>
@@ -11297,10 +11314,10 @@
           </div>
         </div>
         <div class="two-cols">
-          <div class="field">
+          <div id="bankAccountLast4Field" ${wallet ? "hidden" : ""}><div class="field">
             <label for="bankAccountLast4">Final da conta</label>
-            <input id="bankAccountLast4" name="accountLast4" inputmode="numeric" maxlength="4" placeholder="4 ultimos numeros" value="${escapeAttr(item?.accountLast4 || "")}" />
-          </div>
+            <input id="bankAccountLast4" name="accountLast4" inputmode="numeric" maxlength="4" placeholder="4 ultimos numeros" value="${escapeAttr(item?.accountLast4 || "")}" ${wallet ? "disabled" : ""} />
+          </div></div>
           <div class="field">
             <label for="bankAccountColor">Cor do card principal</label>
             <input id="bankAccountColor" name="color" type="color" value="${escapeAttr(nextColor)}" />
@@ -11385,6 +11402,7 @@
         </div>
         ${!cards.length ? `<p class="empty-state subscription-card-hint">Cadastre um cartao para conectar a subscricao na fatura mensal.</p>` : ""}
         <div class="form-actions">
+          ${item ? `<button class="secondary-button" type="button" data-action="delete-subscription" data-id="${escapeAttr(item.id)}">Excluir subscrição</button>` : ""}
           <button class="secondary-button" type="button" data-action="close-modal">Cancelar</button>
           <button class="primary-button" type="submit">Salvar subscricao</button>
         </div>
@@ -13445,7 +13463,9 @@
     closeModal();
     render();
     if (guided) return;
-    showToast(updated ? "Conta bancaria atualizada." : "Conta bancaria salva.");
+    showToast(data.accountType === "wallet"
+      ? (updated ? "Carteira digital atualizada." : "Carteira digital salva.")
+      : (updated ? "Conta bancaria atualizada." : "Conta bancaria salva."));
   }
 
   function saveSubscription(form) {
@@ -13471,7 +13491,7 @@
       startMonth: previous?.startMonth || (billingCycle === "annual" ? state.ui.selectedMonth : dueDate.slice(0, 7)),
       paymentMethod,
       cardId: paymentMethod === "card" ? data.cardId : "",
-      active: true
+      active: previous?.active !== false
     }, true);
     if (billingCycle !== "annual") state.ui.selectedMonth = dueDate.slice(0, 7);
     saveState();
@@ -14705,8 +14725,11 @@
       state.ui.primaryBankAccountId = fallback?.id || "";
       state.ui.selectedDashboardAccountId = fallback?.id || "";
     }
+    const managingSubscriptions = collection === "subscriptions" && modalRoot.querySelector(".modal-manageSubscriptions");
+    if (collection === "subscriptions" && modalRoot.querySelector(".modal-subscription")) closeModal();
     saveState({ remoteNow: true });
     render();
+    if (managingSubscriptions) openModal("manageSubscriptions");
     showToast(message);
   }
 
@@ -18679,12 +18702,24 @@
     const countrySelect = modalRoot.querySelector("#bankAccountCountry");
     const typeSelect = modalRoot.querySelector("#bankAccountType");
     const currencySelect = modalRoot.querySelector("#bankAccountCurrency");
-    const datalist = modalRoot.querySelector("#bankNameOptions");
     if (!countrySelect) return;
     const country = countrySelect.value === "brasil" ? "brasil" : "japao";
     if (typeSelect) typeSelect.innerHTML = bankAccountTypeOptions(country, typeSelect.value);
     if (currencySelect) currencySelect.value = isSingleCurrencyPlan() || firstAccessStage() === "bank" ? primaryCurrency() : countryMeta[country].currency;
-    if (datalist) datalist.innerHTML = bankNameOptions(country);
+    updateBankAccountProviderFields();
+  }
+
+  function updateBankAccountProviderFields() {
+    const form = modalRoot.querySelector('[data-form="bank-account"]');
+    if (!form) return;
+    const { country, accountType, bankName, accountLast4 } = form.elements;
+    const wallet = accountType.value === "wallet";
+    form.querySelector('label[for="bankName"]').textContent = wallet ? "Nome do app" : "Banco";
+    bankName.placeholder = wallet ? "Ex: PayPay, Mercari" : "Ex: Yuucho, Nubank";
+    form.querySelector("#bankNameOptions").innerHTML = bankNameOptions(country.value, accountType.value);
+    form.querySelector("#walletBalanceHelp").hidden = !wallet;
+    form.querySelector("#bankAccountLast4Field").hidden = wallet;
+    accountLast4.disabled = wallet;
   }
 
   function updateTransactionBankFields() {
@@ -19365,9 +19400,10 @@
       .join("");
   }
 
-  function bankNameOptions(country) {
+  function bankNameOptions(country, accountType) {
     const activeCountry = country === "brasil" ? "brasil" : "japao";
-    return (bankSuggestions[activeCountry] || [])
+    const names = accountType === "wallet" ? (activeCountry === "japao" ? ["PayPay", "Mercari"] : []) : bankSuggestions[activeCountry];
+    return (names || [])
       .map((name) => `<option value="${escapeAttr(name)}"></option>`)
       .join("");
   }
