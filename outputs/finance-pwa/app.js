@@ -462,7 +462,7 @@
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./service-worker.js?v=310")
+      navigator.serviceWorker.register("./service-worker.js?v=311")
         .then((registration) => registration.update().catch(() => {}))
         .catch(() => {});
     });
@@ -11290,11 +11290,10 @@
             <datalist id="bankNameOptions">
               ${bankNameOptions(country, selectedType)}
             </datalist>
-            <p class="row-meta" id="walletBalanceHelp" ${wallet ? "" : "hidden"}>Informe o saldo do app na data escolhida. Registre vendas e gastos vinculados à carteira para atualizar o saldo no Nekuma.</p>
           </div>
           <div class="field">
             <label for="bankAccountNickname">Apelido</label>
-            <input id="bankAccountNickname" name="nickname" placeholder="Ex: Salario Japao" value="${escapeAttr(item?.nickname || "")}" />
+            <input id="bankAccountNickname" name="nickname" placeholder="${wallet ? "Ex: Vendas" : "Ex: Salario Japao"}" value="${escapeAttr(item?.nickname || "")}" />
           </div>
         </div>
         <div class="three-cols">
@@ -11313,6 +11312,7 @@
             <input id="bankBalanceDate" name="balanceDate" required type="date" value="${escapeAttr(balanceDate)}" />
           </div>
         </div>
+        <p class="row-meta" id="walletBalanceHelp" ${wallet ? "" : "hidden"}>Informe o saldo na data escolhida. Para atualizar o saldo no Nekuma, vincule suas vendas e gastos à carteira.</p>
         <div class="two-cols">
           <div id="bankAccountLast4Field" ${wallet ? "hidden" : ""}><div class="field">
             <label for="bankAccountLast4">Final da conta</label>
@@ -18712,10 +18712,11 @@
   function updateBankAccountProviderFields() {
     const form = modalRoot.querySelector('[data-form="bank-account"]');
     if (!form) return;
-    const { country, accountType, bankName, accountLast4 } = form.elements;
+    const { country, accountType, bankName, nickname, accountLast4 } = form.elements;
     const wallet = accountType.value === "wallet";
     form.querySelector('label[for="bankName"]').textContent = wallet ? "Nome do app" : "Banco";
     bankName.placeholder = wallet ? "Ex: PayPay, Mercari" : "Ex: Yuucho, Nubank";
+    nickname.placeholder = wallet ? "Ex: Vendas" : "Ex: Salario Japao";
     form.querySelector("#bankNameOptions").innerHTML = bankNameOptions(country.value, accountType.value);
     form.querySelector("#walletBalanceHelp").hidden = !wallet;
     form.querySelector("#bankAccountLast4Field").hidden = wallet;
