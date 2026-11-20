@@ -14629,13 +14629,16 @@
     if (!Array.isArray(current)) return;
     const item = current.find((entry) => entry.id === id);
     if (!item) return;
-    const ok = window.confirm("Excluir este item?");
+    const ok = window.confirm(collection === "incomeSources"
+      ? "Excluir esta empresa e todos os seus salarios recebidos, descontos, recebimentos e registros de trabalho? O saldo sera recalculado. A conta bancaria e os lancamentos de outras origens serao preservados."
+      : "Excluir este item?");
     if (!ok) return;
     const deletedAt = new Date().toISOString();
     state[collection] = current.filter((entry) => entry.id !== id);
     state.deletedItems = normalizeDeletedItems(state.deletedItems);
     state.deletedItems[collection] = { ...(state.deletedItems[collection] || {}), [id]: deletedAt };
     if (collection === "incomeSources") {
+      deleteIncomeSourceLinks(id, deletedAt);
       ["workIncomes", "workScheduleOverrides"].forEach((linkedCollection) => {
         const linkedItems = Array.isArray(state[linkedCollection]) ? state[linkedCollection] : [];
         const linkedDeleted = linkedItems.filter((entry) => entry.sourceId === id);
@@ -14655,6 +14658,26 @@
     saveState({ remoteNow: true });
     render();
     showToast(message);
+  }
+
+  function deleteIncomeSourceLinks(sourceId, deletedAt) {
+    const salaryKey = new RegExp(`^\\d{4}-\\d{2}:salary:${sourceId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
+    const linked = (state.transactions || []).filter(entry => entry.sourceId === sourceId
+      || salaryKey.test(entry.salaryPaymentKey || "")
+      || entry.paymentRef === `salary:${sourceId}`
+      || String(entry.payrollKey || "").startsWith(`${String(entry.payrollKey || "").slice(0, 7)}:salary-deduction:${sourceId}:`));
+    const ids = new Set(linked.map(entry => entry.id));
+    state.transactions = (state.transactions || []).filter(entry => !ids.has(entry.id));
+    rememberDeletedItems("transactions", linked, deletedAt);
+    Object.entries(state.paidCommitments || {}).forEach(([key, payment]) => {
+      if (salaryKey.test(key) || payment?.companyId === sourceId || payment?.sourceId === sourceId) delete state.paidCommitments[key];
+    });
+    state.housingCards = (state.housingCards || []).map(card => ({ ...card, items: (card.items || []).map(item => {
+      const payrollMonths = Object.fromEntries(Object.entries(item.payrollMonths || {}).filter(([, entry]) => entry.companyId !== sourceId));
+      return item.companyId === sourceId
+        ? { ...item, amount: 0, companyId: "", payrollMonths }
+        : { ...item, payrollMonths };
+    }) }));
   }
 
   async function resetDemo() {
