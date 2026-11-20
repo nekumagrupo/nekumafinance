@@ -21,7 +21,7 @@ const encode = source => 'data:text/javascript;base64,' + Buffer.from(source).to
  const json = value => new Response(JSON.stringify(value));
  global.fetch=async(address,options)=>{
   assert.equal(options.redirect,'manual');
-  if(address.endsWith('/auth/v1/user')) return json({id:userId});
+  if(address.endsWith('/auth/v1/user')) return json({id:userId,email:'buyer@example.com'});
   if(address.endsWith('/my_commercial_access')) return json({blocked,enforcementActive:true});
   if(address.endsWith('/stripe_live_reserve')) return json({id:'reservation',user_id:userId,created_at:new Date().toISOString(),session_id:bound?'cs_live_fixture':null,subscription_id:existing?'sub_fixture':null});
   if(address.endsWith('/stripe_live_bind')) {bound=true;return json(true);}
@@ -33,6 +33,7 @@ const encode = source => 'data:text/javascript;base64,' + Buffer.from(source).to
    creations++;
    const data=new URLSearchParams(options.body);
    assert.equal(data.get('line_items[0][price]'),expectedPrice);
+   assert.equal(data.get('customer_email'),'buyer@example.com');
    assert.equal(data.get('metadata[nekuma_validation_price]'),validation?expectedPrice:null);
    assert.equal(data.get('line_items[0][quantity]'),'1');
    assert.equal(data.get('subscription_data[trial_period_days]'),null);

@@ -33,11 +33,12 @@ export async function liveStripe(env, path, parameters, idempotencyKey) {
   return result;
 }
 
-function validationOffer(env, user) {
+function validationOffer(env, user, historical = false) {
   const price = String(env.STRIPE_LIVE_VALIDATION_PRICE_ID || '').trim();
   const owner = String(env.STRIPE_LIVE_VALIDATION_USER || '').trim();
+  const owners = [owner, ...(historical ? String(env.STRIPE_LIVE_VALIDATION_HISTORY_USERS || '').split(',').map(value => value.trim()) : [])];
   if (!/^price_[A-Za-z0-9]+$/.test(price) || !/^[a-f0-9-]{36}$/i.test(owner)
-    || owner !== user?.id || price === env.STRIPE_LIVE_PRO_PRICE_ID) return null;
+    || !/^[a-f0-9-]{36}$/i.test(user?.id || '') || !owners.includes(user.id) || price === env.STRIPE_LIVE_PRO_PRICE_ID) return null;
   return { price, amount: 100, validation: true };
 }
 
@@ -86,7 +87,7 @@ export async function liveCustomer(request, env) {
 export function validateLiveSession(session, user, env = {}) {
   // Keep the validation binding for refunds after new validation checkouts are disabled.
   const marker = session.metadata?.nekuma_validation_price;
-  const offer = marker ? validationOffer(env, user) : { price: env.STRIPE_LIVE_PRO_PRICE_ID, amount: 480, validation: false };
+  const offer = marker ? validationOffer(env, user, true) : { price: env.STRIPE_LIVE_PRO_PRICE_ID, amount: 480, validation: false };
   if (!offer || (marker && marker !== offer.price)) fail(403, 'Oferta de validacao LIVE nao autorizada.');
   if (!/^cs_live_[A-Za-z0-9]+$/.test(session.id || '') || session.livemode !== true
     || session.client_reference_id !== user.id || session.mode !== 'subscription'
@@ -94,4 +95,25 @@ export function validateLiveSession(session, user, env = {}) {
     || session.metadata?.nekuma_user !== user.id || session.metadata?.nekuma_plan !== 'pro')
     fail(403, 'Checkout LIVE divergente.');
   return offer;
+}
+
+export async function expireSupersededValidation(env, user) {
+  // Only the explicitly configured, unpaid checkout replaced by this validation is closed.
+  const sessionId = String(env.STRIPE_LIVE_VALIDATION_SUPERSEDED_SESSION || '').trim();
+  if (!sessionId) return;
+  if (!/^cs_live_[A-Za-z0-9]+$/.test(sessionId) || env.STRIPE_LIVE_PUBLIC === 'true'
+    || env.STRIPE_LIVE_VALIDATION_ENABLED !== 'true' || !validationOffer(env, user))
+    fail(503, 'Encerramento da validacao anterior nao autorizado.');
+  const session = await liveStripe(env, 'checkout/sessions/' + sessionId);
+  const previousUser = session.client_reference_id;
+  if (session.id !== sessionId || previousUser === user.id
+    || !String(env.STRIPE_LIVE_VALIDATION_HISTORY_USERS || '').split(',').map(value => value.trim()).includes(previousUser)
+    || !validateLiveSession(session, { id: previousUser }, env).validation)
+    fail(403, 'Checkout anterior nao corresponde a validacao substituida.');
+  if (session.status === 'expired' && session.payment_status === 'unpaid') return;
+  if (session.status !== 'open' || session.payment_status !== 'unpaid')
+    fail(409, 'Checkout anterior possui pagamento ou conclusao pendente de revisao.');
+  const expired = await liveStripe(env, 'checkout/sessions/' + sessionId + '/expire', {}, 'nekuma-live-expire-' + sessionId);
+  if (expired.id !== sessionId || expired.status !== 'expired' || expired.payment_status !== 'unpaid')
+    fail(503, 'Encerramento do checkout anterior ainda nao confirmado.');
 }

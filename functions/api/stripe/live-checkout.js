@@ -1,4 +1,4 @@
-import { liveCustomer, liveStripe, verifyLiveCatalog, validateLiveSession, liveCheckoutOffer } from '../../_shared/stripe-live.js';
+import { liveCustomer, liveStripe, verifyLiveCatalog, validateLiveSession, liveCheckoutOffer, expireSupersededValidation } from '../../_shared/stripe-live.js';
 import { boundedJson, database, fail, reply } from '../../_shared/paypal-billing.js';
 
 export async function onRequestPost({ request, env }) {
@@ -9,6 +9,7 @@ export async function onRequestPost({ request, env }) {
     const offer = liveCheckoutOffer(env, user);
     if (body.quotedAmount !== offer.amount) fail(409, 'Preco atualizado. Consulte seu pagamento antes de continuar.');
     const price = await verifyLiveCatalog(env, user);
+    if (offer.validation) await expireSupersededValidation(env, user);
     const reservation = await database(env, 'stripe_live_reserve', { target_user: user.id });
     if (!reservation?.id || reservation.user_id !== user.id) fail(503, 'Reserva indisponivel.');
     if (reservation.subscription_id) fail(409, 'Voce ja possui uma assinatura. Gerencie a assinatura existente.');
@@ -19,6 +20,7 @@ export async function onRequestPost({ request, env }) {
       ? await liveStripe(env, 'checkout/sessions/' + encodeURIComponent(reservation.session_id))
       : await liveStripe(env, 'checkout/sessions', {
         mode: 'subscription', 'payment_method_types[0]': 'card', client_reference_id: user.id,
+        ...(user.email ? { customer_email: user.email } : {}),
         'metadata[nekuma_user]': user.id, 'metadata[nekuma_plan]': 'pro',
         ...(offer.validation ? { 'metadata[nekuma_validation_price]': price.id } : {}),
         'subscription_data[metadata][nekuma_user]': user.id, 'subscription_data[metadata][nekuma_plan]': 'pro',
