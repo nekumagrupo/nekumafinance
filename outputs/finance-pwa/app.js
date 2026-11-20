@@ -5307,7 +5307,12 @@
 
   async function stripeLiveRequest(checkout) {
     if (stripeLiveBusy || !remoteSession.user?.id) return;
-    if (checkout && !window.confirm("Assinatura PRO: JPY 480 por mes, com renovacao automatica. Este pagamento e REAL. Continuar para o checkout seguro da Stripe?")) return;
+    const offer = stripeLiveSnapshot?.userId === remoteSession.user.id ? stripeLiveSnapshot : null;
+    if (checkout && (!offer?.available || ![100, 480].includes(offer.amount))) {
+      showToast("Consulte seu pagamento para confirmar o preco antes de assinar.");
+      return;
+    }
+    if (checkout && !window.confirm(`Assinatura PRO${offer.validation ? " - validacao restrita" : ""}: JPY ${offer.amount} por mes, com renovacao automatica. Este pagamento e REAL. Continuar para o checkout seguro da Stripe?`)) return;
     const userId = remoteSession.user.id;
     stripeLiveBusy = true;
     render();
@@ -5315,7 +5320,7 @@
       const token = await currentSupabaseAccessToken();
       const response = await fetch(checkout ? "/api/stripe/live-checkout" : "/api/stripe/live-status", {
         method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify(checkout ? { plan: "pro" } : {})
+        body: JSON.stringify(checkout ? { plan: "pro", quotedAmount: offer.amount } : {})
       });
       if (!(response.headers.get("Content-Type") || "").includes("application/json")) throw new Error("Pagamento temporariamente indisponivel.");
       const data = await response.json();
@@ -5358,13 +5363,14 @@
 
   function renderStripeLivePanel() {
     const snapshot = stripeLiveSnapshot?.userId === remoteSession.user?.id ? stripeLiveSnapshot : null;
+    const amount = snapshot?.amount === 100 && snapshot.validation === true ? 100 : 480;
     return `<section class="content-panel"><div class="panel-head"><h2>Assinatura PRO</h2>
       <button type="button" class="small-action" data-action="stripe-live-status" ${stripeLiveBusy ? "disabled" : ""}>Consultar pagamento</button></div>
-      <p>JPY 480/mes. Renovacao automatica. Familia em breve.</p>
+      <p>JPY ${amount}/mes. Renovacao automatica. ${amount === 100 ? "Validacao restrita: pagamento real. Desative a renovacao apos o teste." : "Familia em breve."}</p>
       <div role="status" aria-live="polite">${snapshot?.error ? `<p>${escapeHtml(snapshot.error)}</p>` : snapshot ? `<p>${snapshot.active ? "Periodo pago confirmado: PRO" : "Nenhum periodo pago ativo confirmado."}</p>` : ""}
       ${snapshot?.paidUntil ? `<p>Periodo pago ate: ${escapeHtml(new Date(snapshot.paidUntil).toLocaleString())}</p>` : ""}
       ${snapshot?.renewalCancelled ? "<p>Renovacao automatica desativada. O periodo pago permanece disponivel.</p>" : ""}</div>
-      ${snapshot?.available && !snapshot.hasSubscription ? `<button type="button" class="small-action" data-action="stripe-live-checkout" ${stripeLiveBusy ? "disabled" : ""}>Assinar PRO - JPY 480/mes</button>` : ""}
+      ${snapshot?.available && !snapshot.hasSubscription ? `<button type="button" class="small-action" data-action="stripe-live-checkout" ${stripeLiveBusy ? "disabled" : ""}>Assinar PRO - JPY ${amount}/mes</button>` : ""}
       ${snapshot?.hasSubscription && !snapshot.renewalCancelled && ["active", "past_due", "trialing"].includes(snapshot.subscriptionStatus) ? `<button type="button" class="small-action" data-action="stripe-live-cancel" ${stripeLiveBusy ? "disabled" : ""}>Desativar renovacao automatica</button>` : ""}
     </section>`;
   }

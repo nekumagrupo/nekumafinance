@@ -82,7 +82,8 @@ export async function processStripeTestEvent(env, incoming, production = null) {
   const binding = await database(env, live ? 'stripe_live_lookup' : 'stripe_test_lookup_subscription', { target_user: user, target_subscription: subscription.id });
   if (!binding?.session_id) fail(503, 'Vinculo Stripe ainda nao disponivel.');
   session ||= await api(env, 'checkout/sessions/' + id(binding.session_id, 'cs'));
-  validate(session, { id: user });
+  const offer = validate(session, { id: user }, env) || { amount: 480, price: env.STRIPE_LIVE_PRO_PRICE_ID };
+  const amount = offer.amount;
   if (session.id !== binding.session_id || id(session.subscription,'sub') !== subscription.id
     || subscription.metadata?.nekuma_plan !== 'pro' || subscription.customer !== session.customer
     || (binding.customer_id && binding.customer_id !== session.customer)
@@ -95,21 +96,21 @@ export async function processStripeTestEvent(env, incoming, production = null) {
     const line = invoice.lines?.data?.[0];
     const price = line?.price;
     const from = line?.period?.start, until = line?.period?.end;
-    if (invoice.status !== 'paid' || invoice.paid !== true || invoice.amount_paid !== 480 || invoice.total !== 480
+    if (invoice.status !== 'paid' || invoice.paid !== true || invoice.amount_paid !== amount || invoice.total !== amount
       || invoice.currency !== 'jpy' || invoice.customer !== session.customer || invoice.collection_method !== 'charge_automatically'
       || !['subscription_create','subscription_cycle'].includes(invoice.billing_reason)
       || invoice.lines?.has_more || invoice.lines?.data?.length !== 1 || line.quantity !== 1 || line.proration
-      || price?.currency !== 'jpy' || price.unit_amount !== 480 || price.recurring?.interval !== 'month' || price.recurring.interval_count !== 1
-      || (live && price.id !== env.STRIPE_LIVE_PRO_PRICE_ID)
+      || price?.currency !== 'jpy' || price.unit_amount !== amount || price.recurring?.interval !== 'month' || price.recurring.interval_count !== 1
+      || (live && price.id !== offer.price)
       || !Number.isInteger(from) || !Number.isInteger(until) || until <= from || until-from > 32*86400 || from*1000 > now+300000
-      || charge.status !== 'succeeded' || !charge.paid || charge.amount !== 480 || charge.currency !== 'jpy'
+      || charge.status !== 'succeeded' || !charge.paid || charge.amount !== amount || charge.currency !== 'jpy'
       || id(charge.invoice,'in') !== invoice.id || charge.customer !== session.customer) fail(400, 'Pagamento Stripe divergente.');
     if (charge.amount_refunded > 0 || charge.refunded || charge.disputed) {
       Object.assign(effect, { action: 'hold', charge: charge.id, reason: charge.disputed ? 'dispute' : 'refund' });
     } else Object.assign(effect, { action: 'paid', invoice: invoice.id, charge: charge.id,
       from: new Date(from*1000).toISOString(), until: new Date(until*1000).toISOString() });
   } else if (event.type === 'charge.refunded' || event.type.startsWith('charge.dispute.')) {
-    if (id(charge.invoice,'in') !== invoice.id || charge.customer !== session.customer || charge.currency !== 'jpy' || charge.amount !== 480) fail(400, 'Pagamento divergente.');
+    if (id(charge.invoice,'in') !== invoice.id || charge.customer !== session.customer || charge.currency !== 'jpy' || charge.amount !== amount) fail(400, 'Pagamento divergente.');
     if (event.type === 'charge.refunded' && !(charge.amount_refunded > 0 || charge.refunded)) fail(503, 'Reembolso ainda nao confirmado.');
     // Dispute closure never clears a refund hold; all resolutions require review.
     Object.assign(effect, { action: 'hold', charge: charge.id, reason: event.type === 'charge.refunded' ? 'refund' : 'dispute' });

@@ -16,7 +16,7 @@ const encode = source => 'data:text/javascript;base64,' + Buffer.from(source).to
     assert.equal(options.redirect, 'manual');
     assert.equal(options.headers.Authorization, 'Bearer sk_live_fixture');
     const body = url.endsWith('/account') ? { id: account, charges_enabled: true, payouts_enabled: payouts }
-      : { id: 'price_fixture', livemode: mode, active: true, type: 'recurring', currency: 'jpy',
+      : { id: url.split('/').at(-1), livemode: mode, active: true, type: 'recurring', currency: 'jpy',
         unit_amount: amount, billing_scheme: 'per_unit', recurring: {
           interval: 'month', interval_count: 1, usage_type: 'licensed', trial_period_days: trial } };
     return new Response(JSON.stringify(body));
@@ -30,6 +30,27 @@ const encode = source => 'data:text/javascript;base64,' + Buffer.from(source).to
     trial = 3; await assert.rejects(live.verifyLiveCatalog(env), /divergente/); trial = null;
     await assert.rejects(live.liveStripe(env, 'checkout/sessions', { mode: 'subscription' }), /idempotencia/);
     await assert.rejects(live.liveStripe(env, 'https://evil.invalid'), /invalida/);
-    console.log('PASS: LIVE disabled by default; test credentials/responses rejected; merchant, payouts, JPY 480 monthly price and idempotency checked. Mocked HTTP only.');
+    const user = { id: '569ccf01-6360-479e-8117-28dcdfba2335' };
+    const restricted = { ...env, STRIPE_LIVE_PUBLIC: 'false', STRIPE_LIVE_VALIDATION_ENABLED: 'true',
+      STRIPE_LIVE_VALIDATION_USER: user.id, STRIPE_LIVE_VALIDATION_PRICE_ID: 'price_validation' };
+    assert.equal(live.liveCheckoutOffer(restricted, user).amount, 100);
+    amount = 100;
+    assert.equal((await live.verifyLiveCatalog(restricted, user)).id, 'price_validation');
+    amount = 480;
+    await assert.rejects(live.verifyLiveCatalog(restricted, user), /divergente/);
+    assert.equal(live.liveCheckoutOffer({ ...restricted, STRIPE_LIVE_PUBLIC: 'true' }, user).amount, 480);
+    assert.equal(live.liveCheckoutOffer({ ...restricted, STRIPE_LIVE_VALIDATION_ENABLED: 'false' }, user).amount, 480);
+    assert.throws(() => live.liveCheckoutOffer(restricted, { id: 'other' }), /restrita/);
+    assert.throws(() => live.liveCheckoutOffer({ ...restricted, STRIPE_LIVE_VALIDATION_PRICE_ID: '' }, user), /restrita/);
+    const session = { id: 'cs_live_validation', livemode: true, mode: 'subscription',
+      client_reference_id: user.id, currency: 'jpy', amount_total: 100,
+      metadata: { nekuma_user: user.id, nekuma_plan: 'pro', nekuma_validation_price: 'price_validation' } };
+    assert.equal(live.validateLiveSession(session, user, restricted).amount, 100);
+    assert.equal(live.validateLiveSession(session, user, { ...restricted, STRIPE_LIVE_VALIDATION_ENABLED: 'false', STRIPE_LIVE_PUBLIC: 'true' }).amount, 100);
+    assert.throws(() => live.validateLiveSession(session, user, env), /nao autorizada/);
+    assert.throws(() => live.validateLiveSession({ ...session, amount_total: 480 }, user, restricted), /divergente/);
+    assert.throws(() => live.validateLiveSession({ ...session, metadata: { ...session.metadata, nekuma_validation_price: undefined } }, user, restricted), /divergente/);
+    assert.throws(() => live.validateLiveSession(session, { id: 'other' }, restricted), /nao autorizada/);
+    console.log('PASS: LIVE merchant/payouts, JPY 480 catalog, private JPY 100 owner/price binding, public rollout and retained refund validation. Mocked HTTP only.');
   } finally { global.fetch = original; }
 })().catch(error => { console.error(error); process.exitCode = 1; });

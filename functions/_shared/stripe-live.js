@@ -33,16 +33,33 @@ export async function liveStripe(env, path, parameters, idempotencyKey) {
   return result;
 }
 
-export async function verifyLiveCatalog(env) {
-  const { price: expected } = liveConfiguration(env);
+function validationOffer(env, user) {
+  const price = String(env.STRIPE_LIVE_VALIDATION_PRICE_ID || '').trim();
+  const owner = String(env.STRIPE_LIVE_VALIDATION_USER || '').trim();
+  if (!/^price_[A-Za-z0-9]+$/.test(price) || !/^[a-f0-9-]{36}$/i.test(owner)
+    || owner !== user?.id || price === env.STRIPE_LIVE_PRO_PRICE_ID) return null;
+  return { price, amount: 100, validation: true };
+}
+
+export function liveCheckoutOffer(env, user) {
+  const validation = validationOffer(env, user);
+  if (env.STRIPE_LIVE_VALIDATION_ENABLED === 'true' && env.STRIPE_LIVE_PUBLIC !== 'true') {
+    if (!validation) fail(503, 'Validacao LIVE restrita ainda nao configurada.');
+    return validation;
+  }
+  return { price: liveConfiguration(env).price, amount: 480, validation: false };
+}
+
+export async function verifyLiveCatalog(env, user) {
+  const { price: expected, amount } = liveCheckoutOffer(env, user);
   await liveStripe(env, 'account');
   const price = await liveStripe(env, 'prices/' + expected);
   if (price.id !== expected || price.active !== true || price.type !== 'recurring'
-    || price.currency !== 'jpy' || price.unit_amount !== 480 || price.billing_scheme !== 'per_unit'
+    || price.currency !== 'jpy' || price.unit_amount !== amount || price.billing_scheme !== 'per_unit'
     || price.recurring?.interval !== 'month' || price.recurring.interval_count !== 1
     || price.recurring.usage_type !== 'licensed' || price.recurring.trial_period_days
     || price.transform_quantity || price.custom_unit_amount)
-    fail(503, 'Preco PRO LIVE divergente do plano JPY 480 mensal.');
+    fail(503, 'Preco PRO LIVE divergente da oferta mensal autorizada.');
   return price;
 }
 
@@ -66,10 +83,15 @@ export async function liveCustomer(request, env) {
   return user;
 }
 
-export function validateLiveSession(session, user) {
+export function validateLiveSession(session, user, env = {}) {
+  // Keep the validation binding for refunds after new validation checkouts are disabled.
+  const marker = session.metadata?.nekuma_validation_price;
+  const offer = marker ? validationOffer(env, user) : { price: env.STRIPE_LIVE_PRO_PRICE_ID, amount: 480, validation: false };
+  if (!offer || (marker && marker !== offer.price)) fail(403, 'Oferta de validacao LIVE nao autorizada.');
   if (!/^cs_live_[A-Za-z0-9]+$/.test(session.id || '') || session.livemode !== true
     || session.client_reference_id !== user.id || session.mode !== 'subscription'
-    || session.currency !== 'jpy' || session.amount_total !== 480
+    || session.currency !== 'jpy' || session.amount_total !== offer.amount
     || session.metadata?.nekuma_user !== user.id || session.metadata?.nekuma_plan !== 'pro')
     fail(403, 'Checkout LIVE divergente.');
+  return offer;
 }

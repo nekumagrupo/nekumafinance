@@ -9,6 +9,9 @@ const encode = value => 'data:text/javascript;base64,' + Buffer.from(value).toSt
  const helper = await import(encode(fs.readFileSync('functions/_shared/stripe-webhook.js','utf8')
   .replace('./stripe-billing.js',stripe).replace('./paypal-billing.js',paypal).replace('./stripe-cycles.js',cycles)));
  const liveMode = process.argv.includes('--live');
+ const validation = process.argv.includes('--validation');
+ assert.ok(!validation || liveMode, 'Validation price is LIVE-only');
+ const amount = validation ? 100 : 480;
  const owner = liveMode ? '569ccf01-6360-479e-8117-28dcdfba2335' : 'user';
  const sessionId = liveMode ? 'cs_live_fixture' : 'cs_test_fixture';
  const liveHelper = await import(encode(fs.readFileSync('functions/_shared/stripe-live.js','utf8').replace('./paypal-billing.js',paypal)));
@@ -16,6 +19,7 @@ const encode = value => 'data:text/javascript;base64,' + Buffer.from(value).toSt
   STRIPE_TEST_USERS:'user', SUPABASE_URL:'https://db.invalid', SUPABASE_SERVICE_ROLE_KEY:'server' };
  const now = Math.floor(Date.now()/1000);
  Object.assign(env, { STRIPE_LIVE_ENABLED:'true',STRIPE_LIVE_SECRET_KEY:'sk_live_fixture',STRIPE_LIVE_ACCOUNT_ID:'acct_fixture',STRIPE_LIVE_PRO_PRICE_ID:'price_fixture',STRIPE_LIVE_WEBHOOK_SECRET:'whsec_fixture' });
+ if (validation) Object.assign(env, { STRIPE_LIVE_VALIDATION_USER: owner, STRIPE_LIVE_VALIDATION_PRICE_ID: 'price_validation' });
  const verify = request => helper.verifiedStripeEvent(request,env,liveMode);
  const processEvent = event => helper.processStripeTestEvent(env,event,liveMode ? {api:liveHelper.liveStripe,validate:liveHelper.validateLiveSession} : null);
  const event = { id:'evt_fixture', type:'invoice.paid', livemode:false, data:{object:{id:'in_fixture'}} };
@@ -33,8 +37,11 @@ const encode = value => 'data:text/javascript;base64,' + Buffer.from(value).toSt
    if('livemode' in value) value.livemode=liveMode;
    if(value.client_reference_id) value.client_reference_id=owner;
    if(value.metadata?.nekuma_user) value.metadata.nekuma_user=owner;
-   if(value.id==='cs_test_fixture') value.id=sessionId;
-   if(value.lines?.data?.[0]?.price) value.lines.data[0].price.id='price_fixture';
+   if(value.id==='cs_test_fixture') {
+    value.id=sessionId;
+    if (validation) value.metadata.nekuma_validation_price='price_validation';
+   }
+   if(value.lines?.data?.[0]?.price) value.lines.data[0].price.id=validation?'price_validation':'price_fixture';
   }
   return new Response(JSON.stringify(value));
  };
@@ -44,13 +51,13 @@ const encode = value => 'data:text/javascript;base64,' + Buffer.from(value).toSt
   if(url.endsWith(liveMode ? '/stripe_live_record' : '/stripe_test_record')) { writes.push(JSON.parse(options.body)); return json(true); }
   if(url.endsWith('/events/evt_fixture')) return json(event);
   if(url.endsWith('/checkout/sessions/'+sessionId)) return json({livemode:false,id:'cs_test_fixture',mode:'subscription',
-   client_reference_id:'user',metadata:{nekuma_user:'user',nekuma_plan:'pro'},currency:'jpy',amount_total:480,subscription:'sub_fixture',customer:'cus_fixture'});
+   client_reference_id:'user',metadata:{nekuma_user:'user',nekuma_plan:'pro'},currency:'jpy',amount_total:amount,subscription:'sub_fixture',customer:'cus_fixture'});
   if(url.endsWith('/subscriptions/sub_fixture')) return json({livemode:false,id:'sub_fixture',customer:'cus_fixture',metadata:{nekuma_user:'user',nekuma_plan:'pro'}});
   if(url.endsWith('/invoices/in_fixture')) return json({livemode:false,id:'in_fixture',subscription:'sub_fixture',customer:'cus_fixture',charge:'ch_fixture',
-   status:'paid',paid:true,amount_paid:mismatch?1:480,total:480,currency:'jpy',collection_method:'charge_automatically',billing_reason:renewal?'subscription_cycle':'subscription_create',
-   lines:{has_more:false,data:[{quantity:1,proration:false,period:{start:now,end:now+30*86400},price:{currency:'jpy',unit_amount:480,recurring:{interval:'month',interval_count:1}}}]}});
+   status:'paid',paid:true,amount_paid:mismatch?1:amount,total:amount,currency:'jpy',collection_method:'charge_automatically',billing_reason:renewal?'subscription_cycle':'subscription_create',
+   lines:{has_more:false,data:[{quantity:1,proration:false,period:{start:now,end:now+30*86400},price:{currency:'jpy',unit_amount:amount,recurring:{interval:'month',interval_count:1}}}]}});
   if(url.endsWith('/charges/ch_fixture')) return json({livemode:false,id:'ch_fixture',invoice:'in_fixture',customer:'cus_fixture',status:'succeeded',paid:true,
-   amount:480,currency:'jpy',amount_refunded:refunded?480:0,refunded,disputed});
+   amount,currency:'jpy',amount_refunded:refunded?amount:0,refunded,disputed});
   if(/\/disputes\/(?:dp|du)_fixture$/.test(url)) return json({livemode:false,id:url.split('/').at(-1),charge:'ch_fixture'});
   throw new Error('Unexpected '+url);
  };

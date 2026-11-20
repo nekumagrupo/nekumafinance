@@ -1,0 +1,58 @@
+{
+  "status": "DRAFT_DO_NOT_ENABLE",
+  "name": "Nekuma Finance | Pesquisa | Japao | PT-BR",
+  "network": "GOOGLE_SEARCH_ONLY",
+  "searchPartners": false,
+  "displayNetwork": false,
+  "locations": ["JP"],
+  "locationOption": "PRESENCE",
+  "languages": ["pt"],
+  "audienceNote": "Idioma e localizacao aproximam o publico; nao comprovam nacionalidade.",
+  "dailyBudget": null,
+  "budgetRequiresOwnerApproval": true,
+  "finalUrl": "https://nekumafinance.app/?home=1&lang=pt-BR&utm_source=google&utm_medium=cpc&utm_campaign=japao_ptbr_search",
+  "headlines": [
+    "Nekuma Finance",
+    "Suas Financas no Japao",
+    "Organize Contas e Gastos",
+    "Controle Ienes e Reais",
+    "Conheca o Plano PRO",
+    "Controle Financeiro Pessoal"
+  ],
+  "descriptions": [
+    "Organize contas, cartoes e despesas em portugues. Conheca o Nekuma Finance.",
+    "Acompanhe suas financas no Japao. Compare os planos e escolha o ideal para voce.",
+    "No PRO, acompanhe moedas diferentes e recursos extras de organizacao financeira."
+  ],
+  "keywordsPhrase": [
+    "controle financeiro no japao",
+    "aplicativo financeiro no japao",
+    "controle de gastos no japao",
+    "organizar financas no japao",
+    "controle financeiro ienes reais"
+  ],
+  "keywordsExact": [
+    "financas no japao",
+    "controle de gastos japao"
+  ],
+  "negativeKeywords": [
+    "emprestimo", "forex", "sinais", "trading", "renda garantida",
+    "investimento garantido", "cassino", "vagas", "emprego", "curso"
+  ],
+  "launchGates": [
+    "Compra LIVE restrita confirmada na Stripe e no historico do aplicativo",
+    "PRO liberado automaticamente sem depender de permissao manual",
+    "Cancelamento de renovacao e reembolso LIVE revisados",
+    "Preco publico de JPY 480 mensal preservado; validacao de JPY 100 nao anunciada",
+    "Termos, identificacao do vendedor e cancelamento visiveis e revisados",
+    "Supabase disponivel, backup e recuperacao definidos",
+    "Vendas publicas habilitadas somente apos validacao",
+    "Conversao de compra confirmada no servidor, nao apenas visita ao retorno do checkout",
+    "Consentimento e privacidade revisados antes de adicionar tags de publicidade",
+    "Orcamento e ativacao final aprovados pelo titular"
+  ],
+  "references": [
+    "https://support.google.com/google-ads/answer/9376662?hl=en",
+    "https://support.google.com/google-ads/answer/1722043?hl=en"
+  ]
+}
