@@ -460,7 +460,7 @@
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./service-worker.js?v=306")
+      navigator.serviceWorker.register("./service-worker.js?v=307")
         .then((registration) => registration.update().catch(() => {}))
         .catch(() => {});
     });
@@ -4493,6 +4493,8 @@
         const display = salaryCardDisplayAmount(card);
         return `<section class="salary-details-source"><h3>${escapeHtml(card.title)}</h3>
           ${display.confirmed ? `<p class="salary-received-value"><span>Liquido recebido</span><strong>${formatMoney(display.amount, display.currency)}</strong></p>` : ""}
+          ${!card.paid && !card.needsConfig && card.date ? `<p class="row-meta">Pagamento previsto para ${formatShortDate(card.date)}.</p>` : ""}
+          ${card.canConfirm ? `<button type="button" class="small-action" data-action="open-modal" data-modal="salaryReceipt" data-payment-id="${escapeAttr(card.ref)}">Confirmar recebimento</button>` : ""}
           <h4>Previsao da escala</h4>${renderSalaryPredictionDetails(card).replace('<details ', '<details open ')}
           ${card.kind !== "factory" ? `<p>${formatMoney(card.amount, card.currency)}</p>` : ""}</section>`;
       }).join("") || '<p>Nenhuma previsao salarial cadastrada.</p>'}</div>`;
