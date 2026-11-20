@@ -228,6 +228,7 @@
     { key: "internet", label: "Internet", icon: "I" },
     { key: "parking", label: "Estacionamento", icon: "E" }
   ];
+  const salaryUtilityKeys = ["electricity", "gas", "water", "internet"];
   const housingPaymentMethodMeta = {
     bank: "Conta/debito",
     pix: "Pix",
@@ -459,7 +460,7 @@
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./service-worker.js?v=303")
+      navigator.serviceWorker.register("./service-worker.js?v=305")
         .then((registration) => registration.update().catch(() => {}))
         .catch(() => {});
     });
@@ -2593,12 +2594,26 @@
       companyId: item.companyId || "",
       payerId: String(item.payerId || item.paidBy || "").trim(),
       recurring: item.recurring == null ? ["rent", "parking"].includes(template?.key) : item.recurring === true,
-      startMonth: item.startMonth || String(item.createdAt || "").slice(0, 7) || currentMonth()
+      startMonth: item.startMonth || String(item.createdAt || "").slice(0, 7) || currentMonth(),
+      payrollMonths: normalizeHousingPayrollMonths(item.payrollMonths, fallbackCurrency)
     });
     const standard = housingItemTemplates.map((template) => normalizeItem(byKey.get(template.key) || {}, template));
     const known = new Set(housingItemTemplates.map((template) => template.key));
     const custom = rawItems.filter((item) => item && !known.has(item.key)).map((item) => normalizeItem(item));
     return [...standard, ...custom];
+  }
+
+  function normalizeHousingPayrollMonths(value, fallbackCurrency) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    return Object.fromEntries(Object.entries(value).filter(([month, entry]) => /^\d{4}-(0[1-9]|1[0-2])$/.test(month)
+      && entry && typeof entry === "object" && Number.isFinite(Number(entry.amount)) && Number(entry.amount) >= 0 && entry.companyId)
+      .map(([month, entry]) => [month, { amount: Number(entry.amount), currency: sanitizeCurrency(entry.currency, fallbackCurrency),
+        companyId: String(entry.companyId), payerId: String(entry.payerId || "") }]));
+  }
+
+  function housingItemForMonth(item, month) {
+    const payroll = item.payrollMonths?.[month];
+    return payroll ? { ...item, ...payroll, active: true, paymentMethod: "company", recurring: false, startMonth: month } : item;
   }
 
   function normalizeCdiRates(value = {}) {
@@ -4343,10 +4358,6 @@
   function renderDesktopWorkspacePrototype(summary) {
     const hideBalance = Boolean(state.ui.hideBalance);
     const salaryCards = dashboardSalaryCards(state.ui.selectedMonth);
-    const salaryTotal = salaryCards.reduce((total, card) => {
-      const net = card.kind === "factory" && hasCommercialFeature("salary_projection") ? number(card.netAmount) : number(card.amount);
-      return total + convert(net, card.currency, primaryCurrency(), latestRate(state.ui.selectedMonth));
-    }, 0);
     const quotes = state.fxQuotes || {};
     const usdJpy = Number(quotes.usdJpy || (quotes.usdBrl && quotes.jpyBrl ? quotes.usdBrl / quotes.jpyBrl : 0));
     const btcUsd = Number(quotes.btcUsd || cryptoPrice("BTC", "USD") || 0);
@@ -4390,12 +4401,7 @@
               <button class="is-disabled" type="button" data-action="prototype-feature" data-feature="Novo espaco" aria-label="Novo espaco, em breve">+</button>
             </nav>
             <div class="workspace-metrics${visibleSecondaryCurrency() ? "" : " workspace-metrics-single"}">
-              <article class="workspace-metric workspace-salary-metric" tabindex="0">
-                <span>Salario previsto</span>
-                <strong>${hideBalance ? "*****" : formatMoney(salaryTotal, primaryCurrency())}</strong>
-                <small>${salaryCards.length ? `${salaryCards.length} fonte${salaryCards.length === 1 ? "" : "s"} no mes` : "Cadastre uma fonte de renda"}</small>
-                ${hasCommercialFeature("salary_projection") ? renderWorkspaceSalaryPopover(salaryCards, hideBalance) : `<small>Bruto previsto - Antes dos descontos</small>`}
-              </article>
+              ${renderWorkspaceSalaryMetric(salaryCards, hideBalance)}
               ${visibleSecondaryCurrency() ? `<article class="workspace-metric workspace-quote"><span>Dolar / Real</span><strong>${quotes.usdBrl ? formatFxRate(quotes.usdBrl, 4) : "--"}</strong>${renderFxChangeChip(quotes.usdBrlChange)}</article>
               <article class="workspace-metric workspace-quote"><span>Dolar / Iene</span><strong>${usdJpy ? formatYenRate(usdJpy) : "--"}</strong>${renderFxChangeChip(quotes.usdJpyChange)}</article>
               <article class="workspace-metric workspace-quote"><span>BTC / Dolar</span><strong>${btcUsd ? formatUsdRate(btcUsd) : "--"}</strong>${renderFxChangeChip(quotes.btcUsdChange)}</article>
@@ -4434,15 +4440,52 @@
     if (!cards.length) return `<div class="workspace-salary-popover" role="tooltip"><p>Nenhuma previsao salarial cadastrada.</p></div>`;
     return `
       <div class="workspace-salary-popover" role="tooltip">
-        <strong>Detalhamento do salario previsto</strong>
+        <strong>Salarios do mes</strong>
         ${cards.map((card) => {
           const gross = number(card.amount);
           const net = card.kind === "factory" ? number(card.netAmount) : gross;
           const deductions = Math.max(0, gross - net);
-          return `<div><span>${escapeHtml(card.title)}</span><small>Bruto ${formatMoney(gross, card.currency)} · Descontos ${formatMoney(deductions, card.currency)}</small><b>${formatMoney(net, card.currency)}</b></div>`;
+          const display = salaryCardDisplayAmount(card);
+          return `<div><span>${escapeHtml(card.title)}</span><small>${display.confirmed ? "Recebido" : "Previsto"}</small><b>${formatMoney(display.amount, display.currency)}</b><small>Previsao: bruto ${formatMoney(gross, card.currency)} · Descontos ${formatMoney(deductions, card.currency)}</small></div>`;
         }).join("")}
       </div>
     `;
+  }
+
+  function salaryCardDisplayAmount(card) {
+    const detailed = hasCommercialFeature("salary_projection");
+    const confirmed = detailed && card.paid === true && card.hasConfirmedReceipt === true;
+    return {
+      confirmed,
+      amount: confirmed ? number(card.receivedAmount) : card.kind === "factory" && detailed ? number(card.netAmount) : number(card.amount),
+      currency: confirmed ? card.receivedCurrency || card.currency : card.currency
+    };
+  }
+
+  function renderWorkspaceSalaryMetric(cards, hideBalance) {
+    const values = cards.map(salaryCardDisplayAmount);
+    const received = values.filter(value => value.confirmed);
+    const total = (received.length ? received : values).reduce((sum, value) => sum + convert(value.amount, value.currency, primaryCurrency(), latestRate(state.ui.selectedMonth)), 0);
+    return `<article class="workspace-metric workspace-salary-metric" tabindex="0">
+      <span>${received.length ? "Salario recebido" : "Salario previsto"}</span>
+      <strong>${hideBalance ? "*****" : formatMoney(total, primaryCurrency())}</strong>
+      <small>${cards.length ? `<span>Recebidos</span>: ${received.length} · <span>Previstos</span>: ${cards.length - received.length}` : "Cadastre uma fonte de renda"}</small>
+      ${hasCommercialFeature("salary_projection") && !hideBalance ? `<button type="button" class="workspace-salary-details-button" data-action="open-modal" data-modal="salaryDetails"><i data-lucide="list" aria-hidden="true"></i><span>Detalhar salario</span></button>${renderWorkspaceSalaryPopover(cards, false)}` : ""}
+    </article>`;
+  }
+
+  function renderSalaryDetailsModal() {
+    if (!hasCommercialFeature("salary_projection")) return renderPlanLock("Salario detalhado");
+    if (state.ui.hideBalance) return `<div class="modal-head"><h2>Salario</h2><button type="button" class="close-button" data-action="close-modal" aria-label="Fechar">x</button></div><p>Saldos ocultos.</p>`;
+    const cards = dashboardSalaryCards(state.ui.selectedMonth);
+    return `<div class="modal-head"><h2>Detalhamento do salario</h2><button type="button" class="close-button" data-action="close-modal" aria-label="Fechar">x</button></div>
+      <div class="salary-details-list">${cards.map(card => {
+        const display = salaryCardDisplayAmount(card);
+        return `<section class="salary-details-source"><h3>${escapeHtml(card.title)}</h3>
+          ${display.confirmed ? `<p class="salary-received-value"><span>Liquido recebido</span><strong>${formatMoney(display.amount, display.currency)}</strong></p>` : ""}
+          <h4>Previsao da escala</h4>${renderSalaryPredictionDetails(card).replace('<details ', '<details open ')}
+          ${card.kind !== "factory" ? `<p>${formatMoney(card.amount, card.currency)}</p>` : ""}</section>`;
+      }).join("") || '<p>Nenhuma previsao salarial cadastrada.</p>'}</div>`;
   }
 
   function renderWorkspaceAccountsCard(hideBalance) {
@@ -4697,7 +4740,7 @@
     const activeReceivingAccount = receivingAccount?.active !== false ? receivingAccount : null;
     return `
       <article class="dashboard-salary-tile ${card.paid ? "is-paid" : ""} ${activeReceivingAccount ? "has-bank-background" : ""}" tabindex="0" aria-describedby="${popoverId}" ${desktopSalaryTileStyleAttrs(card, activeReceivingAccount)}>
-        <div class="dashboard-finance-title"><i data-lucide="calendar-days" aria-hidden="true"></i><strong>Salário previsto</strong>${activeReceivingAccount ? `<span class="dashboard-salary-account-label">Conta salário: ${escapeHtml(bankAccountName(activeReceivingAccount))}</span>` : ""}</div>
+        <div class="dashboard-finance-title"><i data-lucide="calendar-days" aria-hidden="true"></i><strong>${salaryCardDisplayAmount(card).confirmed ? "Salario recebido" : "Salario previsto"}</strong>${activeReceivingAccount ? `<span class="dashboard-salary-account-label">Conta salário: ${escapeHtml(bankAccountName(activeReceivingAccount))}</span>` : ""}</div>
         ${renderSalaryFormula(card, hideBalance)}
         <div class="dashboard-finance-foot"><span>${escapeHtml(card.title)}</span>${card.needsConfig
           ? `<button class="small-action" type="button" data-action="open-modal" data-modal="incomeSource" data-id="${escapeAttr(card.id)}">Configurar salário</button>`
@@ -4748,7 +4791,7 @@
       <div class="salary-card-row ${cards.length === 1 ? "single-card" : ""}">
         ${cards.map((card) => `
           <article class="salary-estimate-card balance-salary-card ${card.paid ? "is-paid" : ""}" ${salaryCardStyleAttrs(card)}>
-            <span><i data-lucide="${card.paid ? "check-circle-2" : "wallet"}" aria-hidden="true"></i>Salario previsto</span>
+            <span><i data-lucide="${card.paid ? "check-circle-2" : "wallet"}" aria-hidden="true"></i>${salaryCardDisplayAmount(card).confirmed ? "Salario recebido" : "Salario previsto"}</span>
             ${renderSalaryFormula(card, hideBalance)}
             ${!hideBalance ? renderSalaryPredictionDetails(card) : ""}
             <div class="salary-card-footer">
@@ -4772,6 +4815,8 @@
     if (card.kind !== "factory") {
       return `<strong>${hideBalance ? "*****" : formatMoneyWithPrimary(card.amount, card.currency, card.month)}</strong>`;
     }
+    const display = salaryCardDisplayAmount(card);
+    if (display.confirmed) return `<div class="salary-gross-summary"><span>Liquido recebido</span><strong>${hideBalance ? "*****" : formatMoneyWithPrimary(display.amount, display.currency, card.paymentMonth)}</strong><small>Confirmado</small></div>`;
     const gross = number(card.amount);
     const deductions = card.deductions?.configured ? number(card.deductions.total) : 0;
     const net = Math.max(0, gross - deductions);
@@ -4865,8 +4910,10 @@
           bankAccountId: source.bankAccountId || "",
           needsConfig,
           paid,
+          hasConfirmedReceipt: Boolean(payment && typeof payment === "object" && payment.amount != null && payment.amount !== "" && Number.isFinite(Number(payment.amount))),
           paymentStatus: payment?.status || (paid ? "reconciled" : "pending"),
           receivedAmount: number(payment?.amount),
+          receivedCurrency: sanitizeCurrency(payment?.currency, estimate.currency),
           variance: number(payment?.difference),
           canConfirm: !needsConfig && !paid && isDateReached(date),
           status: needsConfig ? "Configure o salário" : (paid ? salaryPaymentStatusLabel(payment) : `Previsto ${formatShortDate(date)}`)
@@ -6565,7 +6612,7 @@
     return ({ creditCard: "cards", "credit-card": "cards", cardPurchase: "cards", "card-purchase": "cards",
       investment: "wealth", debt: "wealth", consortium: "wealth", nubankBox: "wealth", "nubank-box": "wealth",
       nubankBoxContribution: "wealth", "nubank-box-contribution": "wealth", receipt: "receipt_scan", web3Wallet: "metamask",
-      salaryReceipt: "salary_projection", "salary-receipt": "salary_projection",
+      salaryReceipt: "salary_projection", "salary-receipt": "salary_projection", salaryDetails: "salary_projection",
       goal: "wealth", emergencyReserve: "wealth", "emergency-reserve": "wealth", goalContribution: "wealth", "goal-contribution": "wealth",
       categoryBudget: "projections", "category-budget": "projections",
       categorizationRule: "automation", "categorization-rule": "automation", projectionScenario: "projections", "projection-scenario": "projections" })[type] || "";
@@ -9664,6 +9711,7 @@
       workOverride: renderWorkOverrideModal,
       workIncome: renderWorkIncomeModal,
       salaryReceipt: renderSalaryReceiptModal,
+      salaryDetails: renderSalaryDetailsModal,
       monthlyPayment: renderMonthlyPaymentModal,
       subscription: renderSubscriptionModal,
       categoryBudget: renderCategoryBudgetModal,
@@ -12369,12 +12417,75 @@
             </select>
           </div>
         </div>
+        ${target.kind === "factory" ? renderSalaryUtilityFields(target) : ""}
         <div class="form-actions">
           <button class="secondary-button" type="button" data-action="dismiss-salary-receipt">Depois</button>
           <button class="primary-button" type="submit">Marcar recebido</button>
         </div>
       </form>
     `;
+  }
+
+  function salaryUtilityHousingCards(source, currency) {
+    const country = bankAccountById(source.bankAccountId)?.country || "japao";
+    return (state.housingCards || []).filter(card => card.active !== false && card.country === country && card.currency === currency);
+  }
+
+  function preferredSalaryHousingId(source, currency, entries) {
+    const cards = salaryUtilityHousingCards(source, currency);
+    const linked = [...new Set(entries.filter(entry => salaryUtilityKeys.includes(entry.housingItemKey)).map(entry => entry.housingId))];
+    return (linked.length === 1 && cards.find(card => card.id === linked[0])?.id)
+      || cards.find(card => card.payrollSourceId === source.id)?.id || (cards.length === 1 ? cards[0].id : "");
+  }
+
+  function renderSalaryUtilityFields(target) {
+    const source = incomeSourceById(target.sourceId);
+    const entries = target.deductionEstimate?.entries || [];
+    const housingId = preferredSalaryHousingId(source, target.currency, entries);
+    return `<fieldset class="salary-utility-fields"><legend>Contas descontadas no salario (${escapeHtml(target.currency)})</legend>
+      <div class="two-cols">${salaryUtilityKeys.map(key => {
+        const label = housingItemTemplates.find(item => item.key === key).label;
+        const amount = entries.filter(entry => entry.housingItemKey === key).reduce((sum, entry) => sum + number(entry.amount), 0);
+        return `<div class="field"><label for="salaryUtility-${key}">${escapeHtml(label)} (opcional)</label><input type="number" id="salaryUtility-${key}" name="salaryUtility_${key}" min="0" step="${target.currency === "JPY" ? "1" : "0.01"}" value="${amount}" /></div>`;
+      }).join("")}</div><div class="field"><label for="salaryHousingCardId">Moradia</label><select id="salaryHousingCardId" name="salaryHousingCardId"><option value="">Nova moradia</option>${salaryUtilityHousingCards(source, target.currency).map(card => `<option value="${escapeAttr(card.id)}" ${selectedAttr(card.id, housingId)}>${escapeHtml(card.name)}</option>`).join("")}</select></div></fieldset>`;
+  }
+
+  function prepareSalaryUtilities({ target, source, data, date, currency, author, now }) {
+    const original = target.deductionEstimate || estimateSalaryDeductions(source, target.grossAmount, target.paymentMonth);
+    if (!salaryUtilityKeys.some(key => Object.hasOwn(data, `salaryUtility_${key}`))) return { deductions: original, housing: null };
+    const amounts = Object.fromEntries(salaryUtilityKeys.map(key => {
+      const raw = String(data[`salaryUtility_${key}`] ?? "").trim();
+      const amount = raw ? Number(raw) : 0;
+      if (!Number.isFinite(amount) || amount < 0 || (currency === "JPY" && !Number.isInteger(amount))) throw new Error("Confira os valores das contas descontadas no salario.");
+      return [key, amount];
+    }));
+    const existingEntries = (original.entries || []).filter(entry => salaryUtilityKeys.includes(entry.housingItemKey));
+    const hasAmounts = Object.values(amounts).some(amount => amount > 0);
+    if (!hasAmounts && !existingEntries.length) return { deductions: original, housing: null };
+    if (currency !== target.currency) throw new Error("Confirme as contas na moeda do holerite.");
+    const month = target.paymentMonth || date.slice(0, 7);
+    const cards = salaryUtilityHousingCards(source, currency);
+    const selected = cards.find(card => card.id === data.salaryHousingCardId);
+    if (data.salaryHousingCardId && !selected) throw new Error("Moradia indisponivel para este salario.");
+    if (existingEntries.some(entry => entry.housingId !== selected?.id)) throw new Error("Selecione a moradia ja vinculada aos descontos do salario.");
+    const payerId = selected?.defaultPayerId || familyDashboardMemberModel().currentKey;
+    const housing = selected ? { ...selected } : { id: uid("hc"), name: `Moradia - ${source.name || "Empresa"}`,
+      country: bankAccountById(source.bankAccountId)?.country || "japao", currency, defaultPayerId: payerId,
+      payrollSourceId: source.id, active: true, createdAt: now, createdBy: author.id };
+    housing.updatedAt = now; housing.updatedBy = author.id; housing.updatedByName = author.name;
+    housing.items = normalizeHousingItems(selected?.items, currency).map(item => {
+      if (!salaryUtilityKeys.includes(item.key) || (!amounts[item.key] && !existingEntries.some(entry => entry.housingItemKey === item.key))) return item;
+      const paid = state.paidCommitments[housingPaymentKey(housing.id, item.key, month)];
+      if (paid && paid.paymentMethod !== "company") throw new Error(`${item.label} ja foi pago fora da folha. Revise a Moradia antes de confirmar.`);
+      return { ...item, payrollMonths: { ...item.payrollMonths, [month]: { amount: amounts[item.key], currency, companyId: source.id, payerId } } };
+    });
+    const entries = (original.entries || []).filter(entry => !salaryUtilityKeys.includes(entry.housingItemKey));
+    salaryUtilityKeys.forEach(key => {
+      if (amounts[key] > 0) entries.push({ key: `housing:${housing.id}:${key}`, housingId: housing.id, housingItemKey: key,
+        label: `${housingItemTemplates.find(item => item.key === key).label} - ${housing.name}`, category: "Moradia", amount: amounts[key], country: housing.country });
+    });
+    const total = entries.reduce((sum, entry) => sum + number(entry.amount), 0);
+    return { housing, deductions: { ...original, ...amounts, configured: original.configured || hasAmounts, entries, total, net: Math.max(0, number(target.grossAmount) - total) } };
   }
 
   function renderMonthlyPaymentModal(paymentRef = "") {
@@ -13529,7 +13640,8 @@
           companyId,
           payerId: String(data[`${key}PayerId`] || defaultPayerId).trim(),
           recurring: data[`${key}Recurring`] === "on",
-          startMonth: /^\d{4}-(0[1-9]|1[0-2])$/.test(data[`${key}StartMonth`] || "") ? data[`${key}StartMonth`] : previousItems.get(key)?.startMonth || state.ui.selectedMonth
+          startMonth: /^\d{4}-(0[1-9]|1[0-2])$/.test(data[`${key}StartMonth`] || "") ? data[`${key}StartMonth`] : previousItems.get(key)?.startMonth || state.ui.selectedMonth,
+          payrollMonths: previousItems.get(key)?.payrollMonths || {}
         };
       });
       const updated = upsertItem("housingCards", data.id, {
@@ -13620,6 +13732,7 @@
       ["id", "name", "customType", "bankAccountId", "currency", "color"].map(key => [key, input[key]])
     );
     const guided = !data.id && firstAccessStage() === "income";
+    const previousSource = data.id ? findItem("incomeSources", data.id) : null;
     if (!data.bankAccountId || !bankAccountById(data.bankAccountId)) {
       showToast("Cadastre e selecione a conta que recebera esta renda.");
       return;
@@ -13677,8 +13790,8 @@
       salaryChildSupportRate: Math.max(0, number(data.salaryChildSupportRate ?? 0.115)),
       salaryIncomeTaxFixed: Math.max(0, number(data.salaryIncomeTaxFixed)),
       salaryResidentTaxFixed: Math.max(0, number(data.salaryResidentTaxFixed)),
-      salaryHousingDeduction: Math.max(0, number(data.salaryHousingDeduction)),
-      salaryParkingDeduction: Math.max(0, number(data.salaryParkingDeduction)),
+      salaryHousingDeduction: Math.max(0, number(previousSource?.salaryHousingDeduction)),
+      salaryParkingDeduction: Math.max(0, number(previousSource?.salaryParkingDeduction)),
       salaryOtherDeduction: Math.max(0, number(data.salaryOtherDeduction)),
       salaryRestRate: salaryLegalAdditionalRate(data.salarySaturdayLegalRate, 25),
       salaryHolidayRate: salaryLegalAdditionalRate(data.salarySundayLegalRate, 35),
@@ -13797,8 +13910,11 @@
         return;
       }
       const source = incomeSourceById(target.sourceId);
-      const deductions = target.deductionEstimate || estimateSalaryDeductions(source, target.grossAmount, target.paymentMonth || date.slice(0, 7));
-      const expectedNetAmount = round(number(target.netAmount), currency === "JPY" ? 0 : 2);
+      let utilityPlan;
+      try { utilityPlan = prepareSalaryUtilities({ target, source, data, date, currency, author, now }); }
+      catch (error) { showToast(error.message); return; }
+      const deductions = utilityPlan.deductions;
+      const expectedNetAmount = round(number(deductions.net ?? target.netAmount), currency === "JPY" ? 0 : 2);
       const receivedAmount = round(amount, currency === "JPY" ? 0 : 2);
       const difference = round(receivedAmount - expectedNetAmount, currency === "JPY" ? 0 : 2);
       const tolerance = Math.max(currency === "JPY" ? 1 : 0.01, Math.abs(expectedNetAmount) * 0.005);
@@ -13814,9 +13930,15 @@
         grossAmount: accountedGross,
         expectedGrossAmount: number(target.grossAmount),
         deductions: deductions.total,
+        deductionEntries: deductions.entries.map(entry => ({ ...entry })),
         currency,
         paymentMonth: target.paymentMonth || date.slice(0, 7)
       };
+      if (utilityPlan.housing) {
+        const housing = utilityPlan.housing;
+        state.housingCards = (state.housingCards || []).some(card => card.id === housing.id)
+          ? state.housingCards.map(card => card.id === housing.id ? housing : card) : [...(state.housingCards || []), housing];
+      }
       state.incomeSources = (state.incomeSources || []).map((item) => item.id === target.sourceId ? { ...item, bankAccountId, updatedAt: now, updatedBy: author.id, updatedByName: author.name } : item);
       state.transactions.unshift({
         id: uid("tx"),
@@ -16642,6 +16764,7 @@
 
   function housingCardMonthRows(card, month) {
     return normalizeHousingItems(card.items, card.currency || primaryCurrency())
+      .map(item => housingItemForMonth(item, month))
       .filter((item) => item.active !== false)
       .filter((item) => number(item.amount) > 0)
       .filter((item) => housingItemOccursInMonth(item, month))
@@ -16660,9 +16783,9 @@
       });
   }
 
-  function housingItemByKey(card, key) {
+  function housingItemByKey(card, key, month = state.ui.selectedMonth) {
     return normalizeHousingItems(card?.items, card?.currency || primaryCurrency())
-      .find((item) => item.key === key);
+      .map(item => housingItemForMonth(item, month)).find((item) => item.key === key);
   }
 
   function housingItemOccursInMonth(item, month) {
@@ -17696,8 +17819,7 @@
         ${input('salaryStandardRemuneration', 'Remuneracao mensal padrao', item?.salaryStandardRemuneration)}
         <p class="field-help">Valor-base definido pela previdencia. No holerite analisado: ¥260.000.</p>
         <div class="two-cols">${input('salaryIncomeTaxFixed', 'Imposto de renda estimado', item?.salaryIncomeTaxFixed)}${input('salaryResidentTaxFixed', 'Imposto residencial', item?.salaryResidentTaxFixed)}</div>
-        <div class="two-cols">${input('salaryHousingDeduction', 'Aluguel manual (opcional)', item?.salaryHousingDeduction)}${input('salaryParkingDeduction', 'Estacionamento manual (opcional)', item?.salaryParkingDeduction)}</div>
-        <p class="field-help">Itens marcados como Desconto pela empresa no card Moradia entram automaticamente e substituem estes valores manuais.</p>
+        ${number(item?.salaryHousingDeduction) || number(item?.salaryParkingDeduction) ? `<p class="field-help">Descontos antigos preservados: aluguel ${formatMoney(number(item.salaryHousingDeduction), item.currency || "JPY")} · estacionamento ${formatMoney(number(item.salaryParkingDeduction), item.currency || "JPY")}</p>` : ""}
         ${input('salaryOtherDeduction', 'Outros descontos fixos', item?.salaryOtherDeduction)}
         <details class="salary-deduction-rates"><summary>Taxas do contrato</summary>
           <div class="two-cols">${input('salaryHealthRate', 'Seguro-saude (%)', item?.salaryHealthRate ?? 5.065)}${input('salaryPensionRate', 'Previdencia social (%)', item?.salaryPensionRate ?? 9.15)}</div>
@@ -17724,6 +17846,7 @@
     if (!source?.id || !paymentMonth) return [];
     const salaryCurrency = sanitizeCurrency(source.currency, "JPY");
     return (state.housingCards || []).flatMap((card) => normalizeHousingItems(card.items, card.currency || salaryCurrency)
+      .map(item => housingItemForMonth(item, paymentMonth))
       .filter((item) => card.active !== false && item.active !== false && housingItemOccursInMonth(item, paymentMonth) && item.paymentMethod === "company" && item.companyId === source.id && number(item.amount) > 0)
       .map((item) => ({
         key: `housing:${card.id}:${item.key}`,

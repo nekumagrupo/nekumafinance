@@ -74,6 +74,9 @@
   };
 
   Object.assign(messages["en-US"], {
+    "Salario recebido": "Salary received", "Detalhar salario": "Salary details", "Detalhamento do salario": "Salary breakdown",
+    "Salarios do mes": "Monthly salaries", "Liquido recebido": "Net received", "Previsao da escala": "Schedule forecast",
+    "Confirmado": "Confirmed", "Recebidos": "Received", "Previstos": "Expected", "Nova moradia": "New housing",
     "Visao geral de": "Overview for", "Salario previsto": "Expected salary", "Contas": "Accounts", "Subscricoes": "Subscriptions",
     "Calendario de turnos": "Shift calendar", "Reserva de emergencia": "Emergency reserve", "Trabalho e Familia": "Work and family",
     "Investimentos": "Investments", "Graficos e Resumos": "Charts and summaries", "Meus Cartoes": "My cards", "Moradia": "Housing",
@@ -112,6 +115,8 @@
   });
 
   Object.assign(messages["ja-JP"], {
+    "Salario recebido": "受取済み給与", "Detalhar salario": "給与明細を見る", "Detalhamento do salario": "給与の内訳",
+    "Salarios do mes": "今月の給与", "Previsao da escala": "勤務予定に基づく予測", "Confirmado": "確認済み", "Recebidos": "受取済み", "Previstos": "予定",
     "Visao geral de": "家計概要", "Salario previsto": "給与予測", "Contas": "口座", "Subscricoes": "サブスクリプション",
     "Calendario de turnos": "勤務カレンダー", "Reserva de emergencia": "緊急予備資金", "Trabalho e Familia": "仕事と家族",
     "Investimentos": "投資", "Graficos e Resumos": "グラフと概要", "Meus Cartoes": "カード", "Moradia": "住居費",

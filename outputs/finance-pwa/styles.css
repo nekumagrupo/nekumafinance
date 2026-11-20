@@ -11607,6 +11607,17 @@ html.auth-mode { background: #f3f7f4; }
 .dashboard-group-heading { margin: 0 0 4px; padding: 4px 2px 12px; font-size: 16px; font-weight: 850; font-family: Manrope, Inter, ui-sans-serif, system-ui, sans-serif; text-align: center; color: #173d32; }
 .dashboard-finance-strip { display: none; }
 .dashboard-salary-mobile-details { display: none; }
+.workspace-salary-details-button { display: inline-flex; align-items: center; justify-self: start; gap: 6px; max-width: 100%; margin-top: 6px; padding: 6px 9px; border: 1px solid rgba(255,255,255,.45); border-radius: 6px; color: #fff; background: rgba(0,0,0,.16); font: inherit; font-size: .875rem; font-weight: 700; cursor: pointer; }
+.workspace-salary-details-button svg { flex: 0 0 16px; width: 16px; height: 16px; }
+.workspace-salary-details-button:focus-visible { outline: 2px solid #d9ff75; outline-offset: 2px; }
+.modal-salaryDetails { width: min(700px, calc(100vw - 24px)); }
+.salary-details-source { min-width: 0; padding: 12px 0; border-bottom: 1px solid #cad8d0; }
+.salary-details-source h3 { margin: 0 0 10px; font-size: 1rem; }
+.salary-details-source h4 { margin: 12px 0 5px; font-size: .875rem; }
+.salary-details-source .salary-breakdown { font-size: .875rem; }
+.salary-received-value { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; color: #0b6f4e; }
+.salary-utility-fields { min-width: 0; margin: 0; padding: 12px; border: 1px solid #cad8d0; border-radius: 6px; }
+.salary-utility-fields legend { max-width: 100%; padding: 0 5px; font-size: .875rem; font-weight: 700; }
 @media (min-width: 1180px) {
   .dashboard-finance-strip {
     position: relative;
