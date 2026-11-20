@@ -462,7 +462,7 @@
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./service-worker.js?v=311")
+      navigator.serviceWorker.register("./service-worker.js?v=312")
         .then((registration) => registration.update().catch(() => {}))
         .catch(() => {});
     });
@@ -6980,7 +6980,8 @@
           const dueState = dueStateForDate(dueDate, paid);
           const progressPercent = progress.total ? clamp(Math.round((progress.paid / progress.total) * 100), 0, 100) : 0;
           const contract = item.contractLast4 ? `Contrato **** ${escapeHtml(item.contractLast4)}` : "Contrato sem final cadastrado";
-          const dueLabel = item.dueDay ? `vence dia ${item.dueDay}` : "vencimento nao informado";
+          const nextDate = item.type === "financing" && item.nextInstallmentDate === dueDate ? dueDate : "";
+          const dueLabel = nextDate ? formatShortDate(nextDate) : item.dueDay ? `vence dia ${item.dueDay}` : "vencimento nao informado";
           const paymentLabel = item.paymentMethod ? ` - ${escapeHtml(item.paymentMethod)}` : "";
           return `
             <div class="debt-card ${paid ? "is-paid" : dueState.tone}">
@@ -6999,7 +7000,7 @@
                 <div class="debt-card-stat">
                   <span>Proxima parcela</span>
                   <strong>${formatMoneyWithPrimary(payment, item.currency)}</strong>
-                  <small>${dueLabel}${paymentLabel}</small>
+                  <small>${nextDate && item.nextInstallmentNumber ? `Nº ${item.nextInstallmentNumber} · ` : ""}${dueLabel}${paymentLabel}</small>
                 </div>
                 <div class="debt-card-stat">
                   <span>Parcelas</span>
@@ -7009,9 +7010,19 @@
                 <div class="debt-card-stat">
                   <span>Saldo devedor</span>
                   <strong>${formatMoneyWithPrimary(outstanding, item.currency)}</strong>
-                  <small>Calculo aproximado</small>
+                  <small>${item.hasReportedOutstanding && item.balanceDate?.slice(0, 7) === state.ui.selectedMonth ? "Informado no extrato" : "Cálculo aproximado"}</small>
                 </div>
               </div>
+              ${item.type === "financing" ? `<details class="debt-contract-details">
+                <summary>Detalhes do financiamento</summary>
+                <div class="debt-card-grid">
+                  <div class="debt-card-stat"><span>Valor financiado</span><strong>${formatMoneyWithPrimary(item.originalAmount, item.currency)}</strong></div>
+                  <div class="debt-card-stat"><span>Prazo contratado</span><strong>${item.contractedInstallments ? `${item.contractedInstallments} meses` : "—"}</strong></div>
+                  ${item.hasReportedOutstanding ? `<div class="debt-card-stat"><span>Saldo informado</span><strong>${formatMoneyWithPrimary(item.outstandingAmount, item.currency)}</strong>${item.balanceDate ? `<small>${formatShortDate(item.balanceDate)}</small>` : ""}</div>` : ""}
+                  ${item.nextInstallmentDate || item.nextInstallmentNumber ? `<div class="debt-card-stat"><span>Prestação informada</span><strong>${item.nextInstallmentNumber ? `Nº ${item.nextInstallmentNumber}` : formatShortDate(item.nextInstallmentDate)}</strong>${item.nextInstallmentNumber && item.nextInstallmentDate ? `<small>${formatShortDate(item.nextInstallmentDate)}</small>` : ""}</div>` : ""}
+                  ${[["Seguro", "insuranceAmount", false], ["Taxa operacional", "adminFeeAmount", false], ["Juros nominais vigentes", "nominalAnnualInterestRate", true], ["Juros efetivos", "annualInterestRate", true], ["Juros efetivos com relacionamento", "relationshipAnnualInterestRate", true]].map(([label, key, rate]) => item[key] == null || item[key] === "" ? "" : `<div class="debt-card-stat"><span>${label}</span><strong>${rate ? `${number(item[key]).toLocaleString("pt-BR", { maximumFractionDigits: 4 })}% a.a.` : formatMoneyWithPrimary(item[key], item.currency)}</strong></div>`).join("")}
+                </div>
+              </details>` : ""}
               <div class="debt-progress" aria-label="${progressPercent}% das parcelas pagas">
                 <div class="debt-progress-copy">
                   <span>Progresso do contrato</span>
@@ -10397,7 +10408,7 @@
           </div>
           <div class="field debt-financing-only">
             <label for="outstandingAmount">Saldo devedor atual</label>
-            <input id="outstandingAmount" name="outstandingAmount" type="number" min="0" step="0.01" value="${item ? number(item.outstandingAmount) || "" : ""}" />
+            <input id="outstandingAmount" name="outstandingAmount" type="number" min="0" step="0.01" value="${item?.hasReportedOutstanding ? number(item.outstandingAmount) : number(item?.outstandingAmount) || ""}" />
           </div>
           <div class="field">
             <label for="installmentAmount">Valor atual da parcela</label>
@@ -10495,10 +10506,29 @@
             </div>
           </div>
         </section>
+        <section class="form-grid debt-statement-fields ${(item?.type || "financing") === "financing" ? "" : "is-hidden"}" aria-label="Dados do extrato de financiamento">
+          <div class="form-section-heading"><div><h3>Dados do extrato</h3></div>
+            <p>Campos opcionais. Use o saldo e o prazo restante da mesma data de referência.</p>
+          </div>
+          <div class="three-cols">
+            <div class="field"><label for="debtRemainingInstallments">Prazo restante (meses)</label>
+              <input id="debtRemainingInstallments" name="remainingInstallments" type="number" min="0" max="600" step="1" value="${escapeAttr(item?.remainingInstallments ?? "")}" /></div>
+            <div class="field"><label for="debtNextInstallmentNumber">Número da próxima prestação</label>
+              <input id="debtNextInstallmentNumber" name="nextInstallmentNumber" type="number" min="1" max="600" step="1" value="${escapeAttr(item?.nextInstallmentNumber ?? "")}" /></div>
+            <div class="field"><label for="debtNextInstallmentDate">Vencimento da próxima prestação</label>
+              <input id="debtNextInstallmentDate" name="nextInstallmentDate" type="date" value="${escapeAttr(item?.nextInstallmentDate || "")}" /></div>
+          </div>
+          <div class="two-cols">
+            <div class="field"><label for="debtNominalRate">Juros nominais vigentes (% a.a.)</label>
+              <input id="debtNominalRate" name="nominalAnnualInterestRate" type="number" min="0" step="0.0001" value="${escapeAttr(item?.nominalAnnualInterestRate ?? "")}" /></div>
+            <div class="field"><label for="debtRelationshipRate">Juros efetivos com relacionamento (% a.a.)</label>
+              <input id="debtRelationshipRate" name="relationshipAnnualInterestRate" type="number" min="0" step="0.0001" value="${escapeAttr(item?.relationshipAnnualInterestRate ?? "")}" /></div>
+          </div>
+        </section>
         <div class="three-cols debt-financing-only">
           <div class="field">
-            <label for="annualInterestRate">Taxa de juros (% a.a.)</label>
-            <input id="annualInterestRate" name="annualInterestRate" type="number" min="0" step="0.01" placeholder="Ex: 8.99" value="${item ? number(item.annualInterestRate) || "" : ""}" />
+            <label for="annualInterestRate">Juros efetivos (% a.a.)</label>
+            <input id="annualInterestRate" name="annualInterestRate" type="number" min="0" step="0.0001" value="${item ? number(item.annualInterestRate) || "" : ""}" />
           </div>
           <div class="field">
             <label for="principalAmortizationAmount">Amortizacao principal</label>
@@ -10515,7 +10545,7 @@
             <input id="insuranceAmount" name="insuranceAmount" type="number" min="0" step="0.01" value="${item ? number(item.insuranceAmount) || "" : ""}" />
           </div>
           <div class="field">
-            <label for="adminFeeAmount">Tarifa administrativa embutida</label>
+            <label for="adminFeeAmount">Taxa operacional / administrativa</label>
             <input id="adminFeeAmount" name="adminFeeAmount" type="number" min="0" step="0.01" value="${item ? number(item.adminFeeAmount) || "" : ""}" />
           </div>
         </div>
@@ -13250,6 +13280,13 @@
     const data = formData(form);
     const current = findItem("debts", data.id);
     const contractLast4 = String(data.contractLast4 || "").replace(/\D/g, "").slice(-4);
+    const financing = data.type === "financing";
+    const optional = key => financing && data[key] != null && data[key] !== "" ? number(data[key]) : null;
+    const remainingInstallments = optional("remainingInstallments");
+    if (remainingInstallments !== null && number(data.contractedInstallments) > 0 && remainingInstallments > number(data.contractedInstallments)) {
+      showToast("O prazo restante deve ser menor ou igual ao prazo contratado.");
+      return;
+    }
     if (data.type === "consortium" && number(data.monthlyAmortizationRate) <= 0) {
       showToast("Informe a amortização mensal indicada no contrato ou extrato.");
       return;
@@ -13273,6 +13310,12 @@
       contractedInstallments: clamp(Math.round(number(data.contractedInstallments)), 0, 600),
       paymentMethod: String(data.paymentMethod || "").trim(),
       annualInterestRate: number(data.annualInterestRate),
+      nominalAnnualInterestRate: optional("nominalAnnualInterestRate"),
+      relationshipAnnualInterestRate: optional("relationshipAnnualInterestRate"),
+      remainingInstallments,
+      nextInstallmentNumber: optional("nextInstallmentNumber"),
+      nextInstallmentDate: financing ? data.nextInstallmentDate || "" : "",
+      hasReportedOutstanding: financing && data.outstandingAmount != null && data.outstandingAmount !== "",
       principalAmortizationAmount: number(data.principalAmortizationAmount),
       interestAmount: number(data.interestAmount),
       insuranceAmount: number(data.insuranceAmount),
@@ -13293,7 +13336,7 @@
     };
     draft.outstandingAmount = draft.type === "consortium"
       ? number(draft.initialAmountToPay) || Math.max(0, consortiumCurrentAssetValue(draft) - number(draft.initialPaidAmount))
-      : number(data.outstandingAmount) || debtEstimatedOutstanding(draft);
+      : data.outstandingAmount != null && data.outstandingAmount !== "" ? number(data.outstandingAmount) : debtEstimatedOutstanding(draft);
     const updated = upsertItem("debts", data.id, draft);
     saveState();
     closeModal();
@@ -14608,8 +14651,14 @@
   }
 
   function updateDebtTypeFields() {
-    const consortium = modalRoot.querySelector("#debtType")?.value === "consortium";
+    const type = modalRoot.querySelector("#debtType")?.value;
+    const consortium = type === "consortium";
     modalRoot.querySelector(".consortium-form-fields")?.classList.toggle("is-hidden", !consortium);
+    const statement = modalRoot.querySelector(".debt-statement-fields");
+    if (statement) {
+      statement.classList.toggle("is-hidden", type !== "financing");
+      statement.querySelectorAll("input").forEach(input => { input.disabled = type !== "financing"; });
+    }
     modalRoot.querySelectorAll(".debt-financing-only").forEach((field) => field.classList.toggle("is-hidden", consortium));
     const originalLabel = modalRoot.querySelector("#debtOriginalAmountLabel");
     const startLabel = modalRoot.querySelector("#debtStartDateLabel");
@@ -16954,6 +17003,7 @@
   }
 
   function debtDateForMonth(item, month) {
+    if (item?.type === "financing" && item.nextInstallmentDate?.slice(0, 7) === month) return item.nextInstallmentDate;
     return dateInMonth(month, item?.dueDay || 1);
   }
 
@@ -17454,6 +17504,17 @@
       return { paid, remaining: Math.max(0, fallbackTotal - paid), total: fallbackTotal };
     }
 
+    const snapshotMonth = item?.balanceDate?.slice(0, 7);
+    if (item?.type === "financing" && item.remainingInstallments != null && snapshotMonth && targetMonth >= snapshotMonth) {
+      const firstDueMonth = item.nextInstallmentDate?.slice(0, 7) || addMonths(snapshotMonth, 1);
+      const newPayments = Object.keys(state.paidCommitments || {}).filter(key => {
+        const month = key.slice(0, 7);
+        return month >= snapshotMonth && month >= firstDueMonth && month <= targetMonth && key === debtPaymentKey(item.id, month);
+      }).length;
+      const remaining = clamp(number(item.remainingInstallments) - newPayments, 0, fallbackTotal);
+      return { paid: fallbackTotal - remaining, remaining, total: fallbackTotal };
+    }
+
     let paid = 0;
     if (item?.startDate) {
       const start = parseLocalDate(item.startDate);
@@ -17560,6 +17621,7 @@
 
   function debtProjectedOutstandingFromCurrentBalance(item, targetMonth = state.ui.selectedMonth) {
     let balance = number(item?.outstandingAmount);
+    if (!balance && item?.hasReportedOutstanding) return 0;
     if (!balance) return null;
 
     const balanceDate = item?.balanceDate ? parseLocalDate(item.balanceDate) : startOfDay(new Date());
