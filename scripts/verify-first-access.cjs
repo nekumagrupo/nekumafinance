@@ -4,6 +4,7 @@ const vm = require("node:vm");
 
 const app = fs.readFileSync("outputs/finance-pwa/app.js", "utf8");
 const stageSource = app.slice(app.indexOf("  function firstAccessStage()"), app.indexOf("  async function saveFirstAccess("));
+const housingSource = app.slice(app.indexOf("  function needsFirstHousing()"), app.indexOf("  function renderPaypalPanel()"));
 const operations = app.match(/const operationCurrencies = [^;]+;/)[0];
 const pendingBankSource = app.slice(app.indexOf("  function pendingFirstAccessBank("), app.indexOf("  function mergeCollectionWithLocal("));
 const user = { id: "new-user", user_metadata: {} };
@@ -12,7 +13,7 @@ const state = { settings: {} };
 let accounts = [];
 let sources = [];
 const context = vm.createContext({ remoteSession, state, activeBankAccounts: () => accounts, userIncomeSources: () => sources, languageSetupRequired: true });
-const stage = vm.runInContext(`${operations}\n${stageSource}\nauthenticatedScreen`, context);
+const stage = vm.runInContext(`${operations}\n${housingSource}\n${stageSource}\nauthenticatedScreen`, context);
 
 assert.equal(stage(), "languageSetup", "Existing accounts retain the old language flow");
 user.user_metadata.nekuma_first_access = 1;
@@ -25,7 +26,9 @@ context.languageSetupRequired = false;
 accounts = [{ id: "bank" }];
 assert.equal(stage(), "income", "Returning after saving the bank resumes at income");
 sources = [{ id: "work" }];
-assert.equal(stage(), "medal", "Returning after saving income resumes at the medal");
+assert.equal(stage(), "housing", "Returning after saving income resumes at housing");
+state.housingCards = [{ id: "housing", items: [] }];
+assert.equal(stage(), "medal", "Housing can be saved without expense or payroll items");
 state.settings.firstAccessFinished = true;
 accounts = [];
 assert.equal(stage(), "ready", "Deleting the bank later does not restart onboarding");
@@ -33,6 +36,28 @@ state.settings.firstAccessFinished = false;
 remoteSession.householdMembers.push({ userId: "other-user", role: "member" });
 assert.equal(stage(), "ready", "Shared households are not reconfigured");
 assert.equal(vm.runInContext("JSON.stringify(operationCurrencies)", context), '{"japao":"JPY","brasil":"BRL","other":"USD"}');
+
+let paid = false;
+Object.assign(context, {
+  currentMonth: () => "2026-11",
+  dashboardSalaryCards: month => month === "2026-11"
+    ? [{ ref: "factory:work:2026-10:2026-11", title: "Empresa", date: "2026-11-10", canConfirm: true, paid }]
+    : [],
+  hasCommercialFeature: () => true,
+  escapeHtml: String,
+  escapeAttr: String,
+  formatShortDate: String
+});
+state.ui = { selectedMonth: "2026-10" };
+state.housingCards = [];
+const receiptNotices = vm.runInContext("renderSalaryReceiptNotices", context);
+assert.match(receiptNotices(), /Cadastrar moradia/);
+assert.doesNotMatch(receiptNotices(), /Confirmar recebimento/);
+state.housingCards = [{ id: "housing" }];
+assert.match(receiptNotices(), /Recebimentos pendentes/);
+assert.match(receiptNotices(), /data-payment-id="factory:work:2026-10:2026-11"/);
+paid = true;
+assert.equal(receiptNotices(), "");
 
 const recoverBank = vm.runInContext(`${pendingBankSource}\npendingFirstAccessBank`, context);
 const bank = { id: "bank", createdBy: user.id };

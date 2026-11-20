@@ -23,7 +23,7 @@
   };
   const operationCurrencies = { japao: "JPY", brasil: "BRL", other: "USD" };
   const singleCurrencyCollections = ["bankAccounts", "incomeSources", "workIncomes", "transactions", "commitments", "creditCards", "cardPurchases", "subscriptions", "housingCards", "cryptoAssets", "vehicles", "vehicleMaintenance", "shoppingLists", "transfers"];
-  const firstAccessScreens = ["setup", "welcome", "bank", "income", "bank-saved", "income-saved", "medal", "trial-offer"];
+  const firstAccessScreens = ["setup", "welcome", "bank", "income", "housing", "bank-saved", "income-saved", "medal", "trial-offer"];
   const outflowTypes = ["expense", "debt", "card", "consortium", "vehicle"];
   const allOutflowTypes = ["expense", "debt", "card", "consortium", "investment", "vehicle"];
   const countryMeta = {
@@ -460,7 +460,7 @@
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./service-worker.js?v=305")
+      navigator.serviceWorker.register("./service-worker.js?v=306")
         .then((registration) => registration.update().catch(() => {}))
         .catch(() => {});
     });
@@ -735,7 +735,10 @@
     if (action === "remove-crypto-custody-transfer") button.closest(".crypto-custody-form-row")?.remove();
     if (action === "add-housing-other") addHousingOtherRow(button);
     if (action === "remove-housing-other") button.closest(".housing-form-row")?.remove();
-    if (action === "dismiss-salary-receipt") closeModal();
+    if (action === "dismiss-salary-receipt") {
+      closeModal();
+      showToast("Você pode confirmar mais tarde em Recebimentos pendentes.");
+    }
     if (action === "dismiss-due-alert") closeModal();
     if (action === "copy-invite-code") copyInviteCode();
     if (action === "copy-referral-code") copyReferralCode();
@@ -986,7 +989,8 @@
     if (metadata.nekuma_welcome_seen !== true) return "welcome";
     if (state.settings.firstAccessFinished) return "";
     if (!activeBankAccounts().length) return "bank";
-    return userIncomeSources().length ? "medal" : "income";
+    if (!userIncomeSources().length) return "income";
+    return needsFirstHousing() ? "housing" : "medal";
   }
 
   function authenticatedScreen() {
@@ -1039,7 +1043,7 @@
     button.disabled = true;
     remoteSession.error = "";
     try {
-      if (stage === "bank" || stage === "income") {
+      if (["bank", "income", "housing"].includes(stage)) {
         openFirstAccessForm(stage);
         return;
       }
@@ -1075,8 +1079,9 @@
     remoteSession.status = "ready";
     state.ui.activeTab = "accounts";
     render();
-    openModal(stage === "bank" ? "bankAccount" : "incomeSource");
-    modalRoot.querySelector(`form[data-form="${stage === "bank" ? "bank-account" : "income-source"}"]`)?.setAttribute("data-first-access", stage);
+    const [modal, form] = ({ bank: ["bankAccount", "bank-account"], income: ["incomeSource", "income-source"], housing: ["housingCard", "housing-card"] })[stage];
+    openModal(modal);
+    modalRoot.querySelector(`form[data-form="${form}"]`)?.setAttribute("data-first-access", stage);
   }
 
   async function confirmAppLanguage(locale) {
@@ -3146,7 +3151,7 @@
           ? `<div class="tab-card-columns">${currentTabContent}</div>`
           : currentTabContent
       ].join("");
-    app.innerHTML = `${renderDesktopPrototypeNav()}${pageContent}`;
+    app.innerHTML = `${renderDesktopPrototypeNav()}${renderSalaryReceiptNotices()}${pageContent}`;
     i18n?.translate(document.body, activeLanguage());
 
     document.querySelectorAll(".nav-item").forEach((item) => {
@@ -3503,11 +3508,15 @@
       "ja-JP": ["最初の収入源を登録", "収入源を追加", "おめでとうございます！", "銀行口座を登録しました。", "収入源を登録しました。", "「はじめの一歩」メダルを獲得しました！", "Nekuma Financeを開く"]
     })[activeLanguage()] || ["Cadastre sua primeira fonte de renda", "Cadastrar fonte de renda", "Parabéns!", "Sua conta bancária foi salva.", "Sua fonte de renda foi salva.", "Você desbloqueou a medalha Primeiros Passos!", "Abrir o Nekuma Finance"];
     const [incomeTitle, incomeAction, congratulations, bankSaved, incomeSaved, medal, finish] = steps;
+    const [housingTitle, housingAction, housingDetail] = ({
+      "en-US": ["Add your housing", "Add housing", "Start with the housing name. Rent and payroll deductions are optional."],
+      "ja-JP": ["住まいを登録", "住まいを追加", "住まいの名前から登録できます。家賃や給与天引きの入力は任意です。"]
+    })[activeLanguage()] || ["Cadastre sua moradia", "Cadastrar moradia", "Comece pelo nome da moradia. Aluguel e descontos em folha são opcionais."];
     const celebration = ["bank-saved", "income-saved", "medal"].includes(stage);
     const trial = proTrialCopy();
-    const heading = ({ setup: title, welcome, bank: bankTitle, income: incomeTitle, "trial-offer": trial.title })[stage] || congratulations;
-    const detail = ({ "bank-saved": bankSaved, "income-saved": incomeSaved, medal, "trial-offer": trial.detail })[stage];
-    const action = ({ setup: save, bank: bankAction, income: incomeAction, medal: finish, "trial-offer": trial.plans })[stage] || next;
+    const heading = ({ setup: title, welcome, bank: bankTitle, income: incomeTitle, housing: housingTitle, "trial-offer": trial.title })[stage] || congratulations;
+    const detail = ({ "bank-saved": bankSaved, "income-saved": incomeSaved, housing: housingDetail, medal, "trial-offer": trial.detail })[stage];
+    const action = ({ setup: save, bank: bankAction, income: incomeAction, housing: housingAction, medal: finish, "trial-offer": trial.plans })[stage] || next;
     return `<section class="first-access-shell"><article class="first-access-card" aria-labelledby="first-access-title">
       ${celebration ? `<div class="first-access-confetti" aria-hidden="true">${Array.from({ length: 24 }, (_, index) => `<i style="--x:${(index * 37) % 101}%;--delay:${(index % 6) * 55}ms;--hue:${(index * 47) % 360};--turn:${(index % 2 ? 1 : -1) * (180 + index * 11)}deg"></i>`).join("")}</div>` : ""}
       <img src="./assets/nekuma-logo-192.png" width="48" height="48" alt="" />
@@ -4020,7 +4029,8 @@
   function showDueAlertIfNeeded() {
     if (modalRoot.innerHTML.trim()) return;
     if (remoteStore.enabled && remoteSession.status !== "ready") return;
-    const salaryAlert = pendingSalaryReceiptAlerts()[0];
+    const salaryAlert = hasCommercialFeature("salary_projection") && pendingSalaryReceiptAlerts()
+      .find(alert => !alert.ref.startsWith("factory:") || !needsFirstHousing());
     if (salaryAlert) {
       const salaryKey = `${localDateKey()}|${salaryAlert.ref}`;
       if (localStorage.getItem(SALARY_RECEIPT_ALERT_KEY) !== salaryKey) {
@@ -4956,10 +4966,34 @@
     return `style="--salary-color:${escapeAttr(color)};--salary-color-rgb:${escapeAttr(hexToRgbValues(color))}"`;
   }
 
-  function pendingSalaryReceiptAlerts() {
-    return dashboardSalaryCards(currentMonth())
+  function needsFirstHousing() {
+    return !(state.housingCards || []).some(card => card.active !== false);
+  }
+
+  function pendingSalaryReceiptAlerts(month = currentMonth()) {
+    return dashboardSalaryCards(month)
       .filter((card) => card.canConfirm && !card.paid)
       .map((card) => ({ ref: card.ref, title: card.title, date: card.date }));
+  }
+
+  function renderSalaryReceiptNotices() {
+    if (firstAccessStage()) return "";
+    if (needsFirstHousing() && userIncomeSources().length) {
+      return `<section class="content-panel salary-receipt-notices">
+        <div class="panel-head"><div><h2>Cadastre sua moradia</h2><p class="row-meta">Aluguel e descontos em folha são opcionais.</p></div>
+        <button class="small-action" type="button" data-action="open-modal" data-modal="housingCard">Cadastrar moradia</button></div>
+      </section>`;
+    }
+    if (!hasCommercialFeature("salary_projection")) return "";
+    const months = new Set([currentMonth(), state.ui.selectedMonth]);
+    const alerts = [...months].flatMap(month => pendingSalaryReceiptAlerts(month));
+    if (!alerts.length) return "";
+    return `<section class="content-panel salary-receipt-notices" aria-label="Recebimentos pendentes">
+      <div class="panel-head"><h2>Recebimentos pendentes</h2></div>
+      ${alerts.map(alert => `<div class="panel-head"><div><strong>${escapeHtml(alert.title)}</strong>
+        <p class="row-meta">${formatShortDate(alert.date)}</p></div>
+        <button class="small-action" type="button" data-action="open-modal" data-modal="salaryReceipt" data-payment-id="${escapeAttr(alert.ref)}">Confirmar recebimento</button></div>`).join("")}
+    </section>`;
   }
 
   function renderPaypalPanel() {
@@ -9678,6 +9712,10 @@
     if (!guardSingleCurrencyForm(type)) return;
     const feature = commercialFeatureForType(type);
     if (type === "salaryReceipt" && !hasCommercialFeature("salary_projection")) { showPlanUpgrade("Salario detalhado"); return; }
+    if (type === "salaryReceipt" && String(id).startsWith("factory:") && needsFirstHousing()) {
+      openModal("housingCard");
+      return;
+    }
     if (type === "creditCard" && !guardCommercialForm(type, { id })) return;
     const readOnly = Boolean(feature && !hasCommercialFeature(feature) && id);
     if (feature && !hasCommercialFeature(feature) && !id) { showPlanUpgrade(); return; }
@@ -11737,8 +11775,9 @@
   }
 
   function renderHousingCardModal(item = null) {
-    const activeCountry = item?.country || "japao";
-    const selectedCurrency = item?.currency || countryMeta[activeCountry]?.currency || primaryCurrency();
+    const firstSource = !item && needsFirstHousing() ? userIncomeSources()[0] : null;
+    const activeCountry = item?.country || bankAccountById(firstSource?.bankAccountId)?.country || "japao";
+    const selectedCurrency = item?.currency || firstSource?.currency || countryMeta[activeCountry]?.currency || primaryCurrency();
     const services = normalizeHousingItems(item?.items, selectedCurrency).map(service => item ? service : { ...service, startMonth: state.ui.selectedMonth });
     const cards = state.creditCards || [];
     const bankAccounts = activeBankAccounts();
@@ -12441,7 +12480,8 @@
 
   function preferredSalaryHousingId(source, currency, entries) {
     const cards = salaryUtilityHousingCards(source, currency);
-    const linked = [...new Set(entries.filter(entry => salaryUtilityKeys.includes(entry.housingItemKey)).map(entry => entry.housingId))];
+    const utilityLinks = entries.filter(entry => salaryUtilityKeys.includes(entry.housingItemKey));
+    const linked = [...new Set((utilityLinks.length ? utilityLinks : entries).map(entry => entry.housingId).filter(Boolean))];
     return (linked.length === 1 && cards.find(card => card.id === linked[0])?.id)
       || cards.find(card => card.payrollSourceId === source.id)?.id || (cards.length === 1 ? cards[0].id : "");
   }
@@ -12450,12 +12490,15 @@
     const source = incomeSourceById(target.sourceId);
     const entries = target.deductionEstimate?.entries || [];
     const housingId = preferredSalaryHousingId(source, target.currency, entries);
+    const cards = salaryUtilityHousingCards(source, target.currency);
+    const fixedHousing = entries.filter(entry => entry.housingId && ["rent", "parking"].includes(entry.housingItemKey));
     return `<fieldset class="salary-utility-fields"><legend>Contas descontadas no salario (${escapeHtml(target.currency)})</legend>
+      ${fixedHousing.map(entry => `<p class="row-meta">${escapeHtml(entry.label)}: ${formatMoney(entry.amount, target.currency)} · configurado na Moradia</p>`).join("")}
       <div class="two-cols">${salaryUtilityKeys.map(key => {
         const label = housingItemTemplates.find(item => item.key === key).label;
         const amount = entries.filter(entry => entry.housingItemKey === key).reduce((sum, entry) => sum + number(entry.amount), 0);
         return `<div class="field"><label for="salaryUtility-${key}">${escapeHtml(label)} (opcional)</label><input type="number" id="salaryUtility-${key}" name="salaryUtility_${key}" min="0" step="${target.currency === "JPY" ? "1" : "0.01"}" value="${amount}" /></div>`;
-      }).join("")}</div><div class="field"><label for="salaryHousingCardId">Moradia</label><select id="salaryHousingCardId" name="salaryHousingCardId"><option value="">Nova moradia</option>${salaryUtilityHousingCards(source, target.currency).map(card => `<option value="${escapeAttr(card.id)}" ${selectedAttr(card.id, housingId)}>${escapeHtml(card.name)}</option>`).join("")}</select></div></fieldset>`;
+      }).join("")}</div><div class="field"><label for="salaryHousingCardId">Moradia para as contas acima</label><select id="salaryHousingCardId" name="salaryHousingCardId"><option value="">${cards.length ? "Selecione uma moradia" : "Nova moradia"}</option>${cards.map(card => `<option value="${escapeAttr(card.id)}" ${selectedAttr(card.id, housingId)}>${escapeHtml(card.name)}</option>`).join("")}</select></div></fieldset>`;
   }
 
   function prepareSalaryUtilities({ target, source, data, date, currency, author, now }) {
@@ -12476,6 +12519,7 @@
     const selected = cards.find(card => card.id === data.salaryHousingCardId);
     if (data.salaryHousingCardId && !selected) throw new Error("Moradia indisponivel para este salario.");
     if (existingEntries.some(entry => entry.housingId !== selected?.id)) throw new Error("Selecione a moradia ja vinculada aos descontos do salario.");
+    if (!selected && cards.length) throw new Error("Selecione a moradia para as contas descontadas no salario.");
     const payerId = selected?.defaultPayerId || familyDashboardMemberModel().currentKey;
     const housing = selected ? { ...selected } : { id: uid("hc"), name: `Moradia - ${source.name || "Empresa"}`,
       country: bankAccountById(source.bankAccountId)?.country || "japao", currency, defaultPayerId: payerId,
@@ -13609,6 +13653,7 @@
   function saveHousingCard(form) {
     try {
       const data = formData(form);
+      const guided = form.dataset.firstAccess === "housing";
       const currency = sanitizeCurrency(data.currency, primaryCurrency());
       const defaultPayerId = String(data.defaultPayerId || state.settings.familyLeaderId || familyDashboardMemberModel().currentKey).trim();
       if (!familyPayerProfile(defaultPayerId)) throw new Error("Selecione quem paga as contas da moradia.");
@@ -13660,7 +13705,8 @@
         active: true,
         items
       });
-      saveState();
+      saveState({ remoteNow: guided });
+      if (guided) remoteSession.status = authenticatedScreen();
       closeModal();
       render();
       showToast(updated ? "Moradia atualizada." : "Moradia salva.");
@@ -13740,6 +13786,7 @@
       ["id", "name", "customType", "bankAccountId", "currency", "color"].map(key => [key, input[key]])
     );
     const guided = !data.id && firstAccessStage() === "income";
+    const needsHousing = !data.id && !userIncomeSources().length && needsFirstHousing();
     const previousSource = data.id ? findItem("incomeSources", data.id) : null;
     if (!data.bankAccountId || !bankAccountById(data.bankAccountId)) {
       showToast("Cadastre e selecione a conta que recebera esta renda.");
@@ -13845,6 +13892,7 @@
     closeModal();
     render();
     if (guided) return;
+    if (needsHousing) openModal("housingCard");
     const savedSource = userIncomeSources().find((source) => source.id === data.id)
       || userIncomeSources().at(-1);
     const missingSalary = isFactory && !hasFactorySalaryConfig(savedSource);
