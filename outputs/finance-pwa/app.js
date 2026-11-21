@@ -462,7 +462,7 @@
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./service-worker.js?v=313")
+      navigator.serviceWorker.register("./service-worker.js?v=314")
         .then((registration) => registration.update().catch(() => {}))
         .catch(() => {});
     });
@@ -875,6 +875,7 @@
     if (event.target.closest(".housing-form-row") && event.target.id.endsWith("PayerId")) updateHousingPayerAccount(event.target);
     if (event.target.closest(".housing-form-row") && event.target.id.endsWith("PaymentMethod")) updateHousingPaymentFields();
     if (event.target.id === "cardPaymentMethod") updateCreditCardPaymentFields();
+    if (["purchaseCardId", "purchaseDate", "firstBillMonth"].includes(event.target.id)) updateCardPurchaseFields(event.target);
     if (event.target.id === "operationCountry") {
       event.target.form.elements.currency.value = operationCurrencies[event.target.value] || "";
     }
@@ -9961,6 +9962,7 @@
         title: "Gastos",
         actions: [
           { modal: "quickExpense", icon: "R", title: "Gasto rapido", meta: "Mercado, kombini, farmacia, roupa ou qualquer compra do dia" },
+          { modal: "cardPurchase", icon: "C", title: "Compra no cartão", meta: "Vincule uma compra à fatura do cartão escolhido" },
           { modal: "creditCard", icon: "C", title: "Adicionar cartao", meta: "Cartao do Brasil ou Japao com bandeira e vencimento" },
           { modal: "subscription", icon: "S", title: "Adicionar subscricao", meta: "Streaming, apps e servicos recorrentes no Pix ou cartao" },
           { modal: "receipt", icon: "S", title: "Scan de recibo", meta: "Fotografar, revisar o total e lancar no financeiro da familia" },
@@ -11196,8 +11198,10 @@
 
   function renderCardPurchaseModal(item = null) {
     const cards = state.creditCards || [];
-    const selectedCard = item ? creditCardById(item.cardId) : null;
+    const selectedCard = creditCardById(item?.cardId) || cards[0];
     const fallbackCurrency = item?.currency || selectedCard?.currency || (state.ui.activeCountry === "brasil" ? "BRL" : "JPY");
+    const purchaseDate = item?.purchaseDate || (item ? dateInMonth(state.ui.selectedMonth, new Date().getDate()) : localDateKey());
+    const firstBillMonth = item?.firstBillMonth || cardPurchaseFirstBillMonth(selectedCard, purchaseDate);
     if (!cards.length) {
       return `
         <div class="modal-head">
@@ -11221,7 +11225,7 @@
           <div class="field">
             <label for="purchaseCardId">Cartao</label>
             <select id="purchaseCardId" name="cardId">
-              ${cards.map((card) => `<option value="${card.id}" ${selectedAttr(card.id, item?.cardId || cards[0]?.id)}>${escapeHtml(card.nickname || card.issuer)} - ${countryMeta[card.country]?.short || "JP"}</option>`).join("")}
+              ${cards.map((card) => `<option value="${escapeAttr(card.id)}" ${selectedAttr(card.id, selectedCard.id)}>${escapeHtml(card.nickname || card.issuer)} · ${escapeHtml(countryMeta[card.country]?.short || card.country || "")} · ${escapeHtml(card.currency)}</option>`).join("")}
             </select>
           </div>
           <div class="field">
@@ -11236,7 +11240,7 @@
           </div>
           <div class="field">
             <label for="purchaseDate">Data da compra</label>
-            <input id="purchaseDate" name="purchaseDate" type="date" required value="${escapeAttr(item?.purchaseDate || dateInMonth(state.ui.selectedMonth, new Date().getDate()))}" />
+            <input id="purchaseDate" name="purchaseDate" type="date" required value="${escapeAttr(purchaseDate)}" />
           </div>
         </div>
         <div class="three-cols">
@@ -11258,7 +11262,7 @@
         <div class="two-cols">
           <div class="field">
             <label for="firstBillMonth">Primeira fatura</label>
-            <input id="firstBillMonth" name="firstBillMonth" type="month" required value="${escapeAttr(item?.firstBillMonth || state.ui.selectedMonth)}" />
+            <input id="firstBillMonth" name="firstBillMonth" type="month" required value="${escapeAttr(firstBillMonth)}" />
           </div>
           ${hasFamilyAccess() ? `<div class="field">
             <label for="purchaseFamilyMember">Responsavel</label>
@@ -13171,8 +13175,7 @@
       const cardId = paymentSource.slice(5);
       const card = creditCardById(cardId);
       if (card) {
-        const purchaseMonth = receipt.date.slice(0, 7);
-        const firstBillMonth = Number(receipt.date.slice(8, 10)) > number(card.closingDay) ? addMonths(purchaseMonth, 1) : purchaseMonth;
+        const firstBillMonth = cardPurchaseFirstBillMonth(card, receipt.date);
         const purchase = { id: linkedCardPurchase?.id || uid("cp"), cardId, country: card.country, title: receipt.merchant || "Recibo", category: receipt.category, totalAmount: receipt.amount, currency: receipt.currency, installments: 1, firstBillMonth, purchaseDate: receipt.date, familyMemberId: receipt.familyMemberId, interestAmount: 0, paymentMethod: "card", note: receipt.note, receiptId, createdFromReceipt: true, quickExpense: true, source: "receipt-scan", createdAt: linkedCardPurchase?.createdAt || now, createdBy: linkedCardPurchase?.createdBy || author.id, createdByName: linkedCardPurchase?.createdByName || author.name, updatedAt: now };
         if (linkedCardPurchase) Object.assign(linkedCardPurchase, purchase);
         else state.cardPurchases.unshift(purchase);
@@ -13456,6 +13459,7 @@
       showToast("Cartao nao encontrado.");
       return;
     }
+    const firstBillMonth = data.firstBillMonth || cardPurchaseFirstBillMonth(card, data.purchaseDate);
     const updated = upsertItem("cardPurchases", data.id, {
       cardId: data.cardId,
       country: card.country,
@@ -13464,13 +13468,13 @@
       totalAmount: number(data.totalAmount),
       currency: data.currency || card.currency,
       installments: clamp(Math.round(number(data.installments)), 1, 60),
-      firstBillMonth: data.firstBillMonth || state.ui.selectedMonth,
+      firstBillMonth,
       purchaseDate: data.purchaseDate,
       familyMemberId: data.familyMemberId || "",
       interestAmount: Math.max(0, number(data.interestAmount)),
       note: data.note.trim()
     }, true);
-    state.ui.selectedMonth = data.firstBillMonth || state.ui.selectedMonth;
+    state.ui.selectedMonth = firstBillMonth;
     saveState();
     closeModal();
     render();
@@ -14644,6 +14648,29 @@
     if (/dinheiro|cash/.test(value)) return "cash";
     if (/pix/.test(value)) return "pix";
     return "balance";
+  }
+
+  function cardPurchaseFirstBillMonth(card, date) {
+    if (!date) return state.ui.selectedMonth;
+    const month = date.slice(0, 7);
+    const closingDay = number(card?.closingDay);
+    return closingDay > 0 && Number(date.slice(8, 10)) > closingDay ? addMonths(month, 1) : month;
+  }
+
+  function updateCardPurchaseFields(input) {
+    const form = input.form;
+    if (form?.dataset.form !== "card-purchase") return;
+    const { cardId, purchaseDate, firstBillMonth, currency } = form.elements;
+    if (input === firstBillMonth) {
+      form.dataset.manualBillMonth = firstBillMonth.value ? "true" : "";
+      return;
+    }
+    const card = creditCardById(cardId.value);
+    if (!card) return;
+    if (input === cardId && !isSingleCurrencyPlan()) currency.value = card.currency;
+    if (!form.dataset.manualBillMonth && purchaseDate.value) {
+      firstBillMonth.value = cardPurchaseFirstBillMonth(card, purchaseDate.value);
+    }
   }
 
   function updateCreditCardPaymentFields() {
