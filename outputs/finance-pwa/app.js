@@ -462,7 +462,7 @@
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./service-worker.js?v=312")
+      navigator.serviceWorker.register("./service-worker.js?v=313")
         .then((registration) => registration.update().catch(() => {}))
         .catch(() => {});
     });
@@ -6981,6 +6981,7 @@
           const progressPercent = progress.total ? clamp(Math.round((progress.paid / progress.total) * 100), 0, 100) : 0;
           const contract = item.contractLast4 ? `Contrato **** ${escapeHtml(item.contractLast4)}` : "Contrato sem final cadastrado";
           const nextDate = item.type === "financing" && item.nextInstallmentDate === dueDate ? dueDate : "";
+          const installmentNumber = financingInstallmentNumber(item, state.ui.selectedMonth);
           const dueLabel = nextDate ? formatShortDate(nextDate) : item.dueDay ? `vence dia ${item.dueDay}` : "vencimento nao informado";
           const paymentLabel = item.paymentMethod ? ` - ${escapeHtml(item.paymentMethod)}` : "";
           return `
@@ -7000,11 +7001,11 @@
                 <div class="debt-card-stat">
                   <span>Proxima parcela</span>
                   <strong>${formatMoneyWithPrimary(payment, item.currency)}</strong>
-                  <small>${nextDate && item.nextInstallmentNumber ? `Nº ${item.nextInstallmentNumber} · ` : ""}${dueLabel}${paymentLabel}</small>
+                  <small>${dueLabel}${paymentLabel}</small>
                 </div>
                 <div class="debt-card-stat">
-                  <span>Parcelas</span>
-                  <strong>${progress.paid}/${progress.total || "--"}</strong>
+                  <span>${installmentNumber !== null ? "Prestação do mês" : "Parcelas pagas"}</span>
+                  <strong>${installmentNumber === null ? progress.paid : installmentNumber >= 1 && (!progress.total || installmentNumber <= progress.total) ? installmentNumber : "—"}/${progress.total || "--"}</strong>
                   <small>${progress.remaining} faltam</small>
                 </div>
                 <div class="debt-card-stat">
@@ -16997,6 +16998,8 @@
 
   function isDebtActiveInMonth(item, month) {
     const progress = debtInstallmentProgress(item, month);
+    const installment = financingInstallmentNumber(item, month);
+    if (installment !== null) return installment >= 1 && (!progress.total || installment <= progress.total);
     if (progress.total && progress.paid >= progress.total && !isDebtPaid(item.id, month)) return false;
     const startMonth = item.startDate ? item.startDate.slice(0, 7) : "";
     return !startMonth || month >= startMonth;
@@ -17490,6 +17493,18 @@
     return number(item?.installmentAmount);
   }
 
+  function financingInstallmentNumber(item, month) {
+    if (item?.type !== "financing" || !month) return null;
+    const snapshotMonth = item.balanceDate?.slice(0, 7);
+    const statementMonth = item.nextInstallmentDate?.slice(0, 7) || (snapshotMonth ? addMonths(snapshotMonth, 1) : "");
+    const total = number(item.contractedInstallments);
+    const statementNumber = number(item.nextInstallmentNumber)
+      || (total && item.remainingInstallments != null ? total - number(item.remainingInstallments) + 1 : 0);
+    if (statementMonth && statementNumber > 0) return statementNumber + monthDiff(statementMonth, month);
+    const startMonth = item.startDate?.slice(0, 7);
+    return startMonth ? 1 + monthDiff(startMonth, month) : null;
+  }
+
   function debtInstallmentProgress(item, targetMonth = state.ui.selectedMonth) {
     const original = number(item?.originalAmount);
     const storedOutstanding = number(item?.outstandingAmount);
@@ -17505,7 +17520,12 @@
     }
 
     const snapshotMonth = item?.balanceDate?.slice(0, 7);
-    if (item?.type === "financing" && item.remainingInstallments != null && snapshotMonth && targetMonth >= snapshotMonth) {
+    const scheduled = financingInstallmentNumber(item, targetMonth);
+    if (item?.type === "financing" && item.remainingInstallments != null && snapshotMonth) {
+      if (targetMonth < snapshotMonth && scheduled !== null) {
+        const paid = clamp(scheduled, 0, fallbackTotal - clamp(number(item.remainingInstallments), 0, fallbackTotal));
+        return { paid, remaining: fallbackTotal - paid, total: fallbackTotal };
+      }
       const firstDueMonth = item.nextInstallmentDate?.slice(0, 7) || addMonths(snapshotMonth, 1);
       const newPayments = Object.keys(state.paidCommitments || {}).filter(key => {
         const month = key.slice(0, 7);
@@ -17516,7 +17536,11 @@
     }
 
     let paid = 0;
-    if (item?.startDate) {
+    if (scheduled !== null) {
+      const cutoff = currentMonth();
+      const elapsed = financingInstallmentNumber(item, targetMonth < cutoff ? targetMonth : cutoff);
+      paid = elapsed - (targetMonth >= cutoff && !isDebtPaid(item.id, cutoff) ? 1 : 0);
+    } else if (item?.startDate) {
       const start = parseLocalDate(item.startDate);
       const today = startOfDay(new Date());
       if (start <= today) {
