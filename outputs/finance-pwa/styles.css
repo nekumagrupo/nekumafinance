@@ -3925,6 +3925,41 @@ canvas {
   transition: width 220ms ease;
 }
 
+.debt-payment-breakdown {
+  display: grid;
+  gap: 7px;
+  margin-top: 5px;
+}
+
+.debt-payment-track {
+  display: flex;
+}
+
+.debt-payment-principal { background-color: #2463b7; }
+.debt-payment-interest { background-color: #c43b49; }
+
+.debt-payment-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  font-size: 0.76rem;
+}
+
+.debt-payment-legend > div {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.debt-payment-legend > div > span:first-child {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.debt-payment-legend strong { display: block; }
+
 .consortium-list,
 .consortium-card,
 .consortium-details,

@@ -462,7 +462,7 @@
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./service-worker.js?v=314")
+      navigator.serviceWorker.register("./service-worker.js?v=315")
         .then((registration) => registration.update().catch(() => {}))
         .catch(() => {});
     });
@@ -7028,12 +7028,13 @@
               <div class="debt-progress" aria-label="${progressPercent}% das parcelas pagas">
                 <div class="debt-progress-copy">
                   <span>Progresso do contrato</span>
-                  <strong>${progressPercent}% quitado</strong>
+                  <strong>${progressPercent}% das parcelas</strong>
                 </div>
                 <div class="debt-progress-track" aria-hidden="true">
                   <div class="debt-progress-fill" style="width:${progressPercent}%"></div>
                 </div>
                 <p>${progress.paid} pagas - ${progress.remaining} restantes</p>
+                ${item.type === "financing" ? renderFinancingPaymentBreakdown(item, progress.paid, progressPercent) : ""}
               </div>
               <div class="row-actions">
                 <button class="small-action ${paid ? "ghost" : ""}" type="button" data-action="${paid ? "none" : "open-modal"}" data-modal="monthlyPayment" data-payment-id="debt:${item.id}">${paid ? "Pago" : "Pagar"}</button>
@@ -7045,6 +7046,30 @@
         }).join("")}
       </div>
     `;
+  }
+
+  function renderFinancingPaymentBreakdown(item, paidInstallments, progressPercent) {
+    const amortization = number(item.principalAmortizationAmount);
+    const interest = number(item.interestAmount);
+    const hasBreakdown = item.hasInstallmentBreakdown ?? (amortization > 0 && interest > 0);
+    if (!hasBreakdown || amortization + interest <= 0) {
+      return `<p>Informe a amortização e os juros da parcela em Editar contrato para ver a estimativa.</p>`;
+    }
+
+    const principalWidth = progressPercent * (amortization / (amortization + interest));
+    const interestWidth = progressPercent - principalWidth;
+    return `<div class="debt-payment-breakdown">
+      <p>Composição estimada do valor pago</p>
+      <div class="debt-progress-track debt-payment-track" aria-hidden="true">
+        <span class="debt-payment-principal" style="width:${principalWidth}%"></span>
+        <span class="debt-payment-interest" style="width:${interestWidth}%"></span>
+      </div>
+      <div class="debt-payment-legend">
+        <div><span class="debt-payment-principal" aria-hidden="true"></span><span>Principal amortizado<strong>${formatMoney(amortization * paidInstallments, item.currency)}</strong></span></div>
+        <div><span class="debt-payment-interest" aria-hidden="true"></span><span>Juros pagos<strong>${formatMoney(interest * paidInstallments, item.currency)}</strong></span></div>
+      </div>
+      <p>Estimativa pela parcela informada × parcelas pagas. Seguro e tarifas ficam fora.</p>
+    </div>`;
   }
 
   function renderConsortiumList() {
@@ -10534,12 +10559,12 @@
             <input id="annualInterestRate" name="annualInterestRate" type="number" min="0" step="0.0001" value="${item ? number(item.annualInterestRate) || "" : ""}" />
           </div>
           <div class="field">
-            <label for="principalAmortizationAmount">Amortizacao principal</label>
-            <input id="principalAmortizationAmount" name="principalAmortizationAmount" type="number" min="0" step="0.01" value="${item ? number(item.principalAmortizationAmount) || "" : ""}" />
+            <label for="principalAmortizationAmount">Amortização da parcela atual</label>
+            <input id="principalAmortizationAmount" name="principalAmortizationAmount" type="number" min="0" step="0.01" value="${item?.hasInstallmentBreakdown ? number(item.principalAmortizationAmount) : number(item?.principalAmortizationAmount) || ""}" />
           </div>
           <div class="field">
             <label for="interestAmount">Juros da parcela atual</label>
-            <input id="interestAmount" name="interestAmount" type="number" min="0" step="0.01" value="${item ? number(item.interestAmount) || "" : ""}" />
+            <input id="interestAmount" name="interestAmount" type="number" min="0" step="0.01" value="${item?.hasInstallmentBreakdown ? number(item.interestAmount) : number(item?.interestAmount) || ""}" />
           </div>
         </div>
         <div class="three-cols debt-financing-only">
@@ -13322,6 +13347,8 @@
       hasReportedOutstanding: financing && data.outstandingAmount != null && data.outstandingAmount !== "",
       principalAmortizationAmount: number(data.principalAmortizationAmount),
       interestAmount: number(data.interestAmount),
+      hasInstallmentBreakdown: financing && data.principalAmortizationAmount != null && data.principalAmortizationAmount !== ""
+        && data.interestAmount != null && data.interestAmount !== "",
       insuranceAmount: number(data.insuranceAmount),
       adminFeeAmount: number(data.adminFeeAmount),
       groupNumber: String(data.groupNumber || "").trim(),
