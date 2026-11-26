@@ -151,6 +151,7 @@
     commitments: "co",
     debts: "de",
     investments: "iv",
+    forexTrades: "ft",
     nubankBoxes: "nb",
     nubankBoxContributions: "nc",
     creditCards: "cc",
@@ -462,7 +463,7 @@
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./service-worker.js?v=316")
+      navigator.serviceWorker.register("./service-worker.js?v=317")
         .then((registration) => registration.update().catch(() => {}))
         .catch(() => {});
     });
@@ -696,6 +697,11 @@
     if (action === "delete-card-purchase") deleteItem("cardPurchases", button.dataset.id, "Compra removida.");
     if (action === "delete-bank-account") deleteItem("bankAccounts", button.dataset.id, "Conta bancaria removida.");
     if (action === "delete-subscription") deleteItem("subscriptions", button.dataset.id, "Subscricao removida.");
+    if (action === "delete-forex-trade") {
+      if (!hasHouseholdPermission("write")) return;
+      deleteItem("forexTrades", button.dataset.id, "Operação removida.");
+      if (!findItem("forexTrades", button.dataset.id)) openModal("forexHistory");
+    }
     if (action === "delete-goal") deleteFinancialGoal(button.dataset.id);
     if (action === "delete-goal-contribution") deleteItem("goalContributions", button.dataset.id, "Aporte removido.");
     if (action === "delete-crypto") deleteItem("cryptoAssets", button.dataset.id, "Cripto removida.");
@@ -791,6 +797,8 @@
     if (formType === "financing-links") saveFinancingLinks(form);
     if (formType === "financing-receipt") saveFinancingReceipt(form);
     if (formType === "investment") saveInvestment(form);
+    if (formType === "forex-goal") saveForexGoal(form);
+    if (formType === "forex-trade") saveForexTrade(form);
     if (formType === "nubank-box") saveNubankBox(form);
     if (formType === "nubank-box-contribution") saveNubankBoxContribution(form);
     if (formType === "credit-card") saveCreditCard(form);
@@ -872,6 +880,9 @@
     if (event.target.id === "commitmentCategory") updateCommitmentCategoryField();
     if (event.target.id === "commitmentType") updateCommitmentProviderField();
     if (event.target.id === "debtType") updateDebtTypeFields();
+    if (event.target.id === "propertyReceiptKind") {
+      event.target.form.querySelector("#propertyReceiptTermField").hidden = event.target.value !== "sale";
+    }
     if (event.target.id === "monthlyPaymentMethod") updateMonthlyPaymentFields();
     if (event.target.id === "housingDefaultPayerId") updateHousingDefaultPayerLabels(event.target);
     if (event.target.closest(".housing-form-row") && event.target.id.endsWith("PayerId")) updateHousingPayerAccount(event.target);
@@ -2011,6 +2022,8 @@
       commitments: Array.isArray(raw.commitments) ? raw.commitments : base.commitments,
       debts: Array.isArray(raw.debts) ? raw.debts : base.debts,
       investments: Array.isArray(raw.investments) ? raw.investments : base.investments,
+      forexGoal: number(raw.forexGoal?.target) > 0 && isForexDate(raw.forexGoal?.startDate) ? raw.forexGoal : base.forexGoal,
+      forexTrades: Array.isArray(raw.forexTrades) ? raw.forexTrades : base.forexTrades,
       nubankBoxes: Array.isArray(raw.nubankBoxes) ? raw.nubankBoxes : base.nubankBoxes,
       nubankBoxContributions: Array.isArray(raw.nubankBoxContributions) ? raw.nubankBoxContributions : base.nubankBoxContributions,
       creditCards: Array.isArray(raw.creditCards) ? raw.creditCards : base.creditCards,
@@ -2802,11 +2815,13 @@
       return { state: { ...(remoteReset > localReset ? remote : local), ui: local.ui }, changed: localReset > remoteReset };
     }
     const crypto = mergeCryptoAssetsWithLocal(remote.cryptoAssets, local.cryptoAssets);
-    const merged = mergeLocalCollections(remote, local, ["incomeSources", "workIncomes", "workScheduleOverrides", "familyMembers", "familyBusinesses", "shoppingLists", "receipts", "vehicles", "nubankBoxes", "nubankBoxContributions", "financialSnapshots", "achievementLedger", "categoryBudgets"]);
+    const merged = mergeLocalCollections(remote, local, ["incomeSources", "workIncomes", "workScheduleOverrides", "familyMembers", "familyBusinesses", "shoppingLists", "receipts", "vehicles", "nubankBoxes", "nubankBoxContributions", "financialSnapshots", "achievementLedger", "categoryBudgets", "forexTrades"]);
     const deletedItems = mergeDeletedItems(remote.deletedItems, local.deletedItems);
     const mergedWallet = mergeSavedWallets(remote.web3Wallet, local.web3Wallet);
     const walletChanged = JSON.stringify(mergedWallet) !== JSON.stringify(remote.web3Wallet);
     const next = { ...remote, ...merged.collections, cryptoAssets: crypto.items, deletedItems, ui: local.ui, web3Wallet: mergedWallet };
+    const localForexGoalIsNewer = itemSyncTime(local.forexGoal || {}) > itemSyncTime(remote.forexGoal || {});
+    if (localForexGoalIsNewer) next.forexGoal = local.forexGoal;
     const pendingExpenses = restorePendingQuickExpenses(remote.transactions, local, deletedItems.transactions);
     next.transactions = pendingExpenses.transactions;
     next.ui = { ...local.ui, pendingQuickExpenseIds: pendingExpenses.ids };
@@ -2816,7 +2831,7 @@
       if (Array.isArray(next[collection])) next[collection] = next[collection].filter(item => !deletions[item.id] || itemSyncTime(item) > Date.parse(deletions[item.id]));
     }
     next.vehicle = next.vehicles[0] || createInitialState().vehicle;
-    return { state: next, changed: Boolean(pendingBank) || pendingExpenses.ids.length > 0 || walletChanged || merged.changed || crypto.changed || cryptoAssetsWereNormalized(rawRemote.cryptoAssets, remote.cryptoAssets) };
+    return { state: next, changed: Boolean(pendingBank) || pendingExpenses.ids.length > 0 || localForexGoalIsNewer || walletChanged || merged.changed || crypto.changed || cryptoAssetsWereNormalized(rawRemote.cryptoAssets, remote.cryptoAssets) };
   }
 
   function restorePendingQuickExpenses(remote, local, deleted = {}) {
@@ -2967,6 +2982,8 @@
       commitments: [],
       debts: [],
       investments: [],
+      forexGoal: null,
+      forexTrades: [],
       nubankBoxes: [],
       nubankBoxContributions: [],
       creditCards: [],
@@ -5372,11 +5389,90 @@
           </div>
           <div class="wealth-card-column">
             <article class="content-panel wealth-investments-card"><div class="panel-head"><h2>Investimentos</h2><button class="small-action" type="button" data-action="open-modal" data-modal="investment">Novo</button></div>${renderInvestmentList()}${hasNubankAccount() ? `<div class="nubank-boxes-inline">${renderNubankBoxesPanel()}</div>` : ""}</article>
+            ${renderForexCard()}
             <article class="content-panel wealth-consortium-card"><div class="panel-head"><h2>Consorcios</h2><button class="small-action" type="button" data-action="open-modal" data-modal="consortium">Novo consorcio</button></div>${renderConsortiumList()}</article>
           </div>
         </section>
       </div>
     `;
+  }
+
+  function forexTradesNewestFirst() {
+    return (state.forexTrades || []).filter(item => item?.id && item.date)
+      .sort((a, b) => b.date.localeCompare(a.date) || String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+  }
+
+  function forexProgress(trades, goal, today) {
+    const eligible = trades.filter(item => item.date <= today);
+    const todayTotal = eligible.filter(item => item.date === today).reduce((total, item) => total + number(item.result), 0);
+    const target = number(goal?.target);
+    const total = target > 0 ? eligible.filter(item => item.date >= goal.startDate).reduce((sum, item) => sum + number(item.result), 0) : 0;
+    return { todayTotal, total, latest: eligible[0], percent: target > 0 ? total / target * 100 : 0, remaining: Math.max(0, target - total) };
+  }
+
+  function formatForexResult(value) {
+    return `${value > 0 ? "+" : ""}${formatMoney(value, "JPY")}`;
+  }
+
+  function renderForexCard() {
+    const goal = state.forexGoal;
+    const { todayTotal, total, latest, percent, remaining } = forexProgress(forexTradesNewestFirst(), goal, localDateKey());
+    return `<article class="content-panel">
+      <div class="panel-head"><h2>Forex</h2><button class="small-action" type="button" data-action="open-modal" data-modal="forexTrade">Registrar operação</button></div>
+      <div class="debt-card-grid">
+        <div class="debt-card-stat"><span>Resultado de hoje</span><strong>${formatForexResult(todayTotal)}</strong></div>
+        <div class="debt-card-stat"><span>Última operação</span><strong>${latest ? escapeHtml(latest.pair) : "—"}</strong>
+          ${latest ? `<small>${formatForexResult(number(latest.result))} · ${formatShortDate(latest.date)}</small>` : ""}</div>
+      </div>
+      ${goal ? `<div class="debt-progress">
+        <div class="debt-progress-copy"><span>Meta de ${formatMoney(goal.target, "JPY")} · desde ${formatShortDate(goal.startDate)}</span><strong>${percent.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%</strong></div>
+        <div class="debt-progress-track" aria-hidden="true"><div class="debt-progress-fill" style="width:${clamp(percent, 0, 100)}%"></div></div>
+        <p>${formatForexResult(total)} acumulados · ${remaining ? `faltam ${formatMoney(remaining, "JPY")}` : "meta atingida"}</p>
+      </div>` : ""}
+      <div class="row-actions">
+        <button class="small-action ghost" type="button" data-action="open-modal" data-modal="forexGoal">${goal ? "Editar meta" : "Definir meta"}</button>
+        <button class="small-action ghost" type="button" data-action="open-modal" data-modal="forexHistory">Ver histórico</button>
+      </div>
+    </article>`;
+  }
+
+  function renderForexGoalModal() {
+    const goal = state.forexGoal;
+    return `<div class="modal-head"><h2>Meta de Forex</h2><button class="close-button" type="button" data-action="close-modal" aria-label="Fechar">x</button></div>
+      <form class="form-grid" data-form="forex-goal">
+        <div class="two-cols">
+          <div class="field"><label for="forexTarget">Meta em ienes</label><input id="forexTarget" name="target" type="number" min="1" step="1" required placeholder="1000000" value="${escapeAttr(goal?.target ?? "")}" /></div>
+          <div class="field"><label for="forexStartDate">Data de início</label><input id="forexStartDate" name="startDate" type="date" required value="${escapeAttr(goal?.startDate || localDateKey())}" /></div>
+        </div>
+        <div class="form-actions"><button class="secondary-button" type="button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">Salvar meta</button></div>
+      </form>`;
+  }
+
+  function renderForexTradeModal(item = null) {
+    const today = localDateKey();
+    return `<div class="modal-head"><h2>${item ? "Editar operação Forex" : "Registrar operação Forex"}</h2><button class="close-button" type="button" data-action="close-modal" aria-label="Fechar">x</button></div>
+      <form class="form-grid" data-form="forex-trade">
+        ${editHidden(item)}
+        <div class="two-cols">
+          <div class="field"><label for="forexPair">Par negociado</label><input id="forexPair" name="pair" required maxlength="12" placeholder="Ex: USD/JPY" value="${escapeAttr(item?.pair || "")}" /></div>
+          <div class="field"><label for="forexTradeDate">Data da operação</label><input id="forexTradeDate" name="date" type="date" required max="${today}" value="${escapeAttr(item?.date || today)}" /></div>
+        </div>
+        <div class="field"><label for="forexTradeResult">Resultado líquido em ienes</label><input id="forexTradeResult" name="result" type="number" step="1" required value="${escapeAttr(item?.result ?? "")}" />
+          <small class="field-hint">Informe o valor após taxas. Use um valor negativo para prejuízo.</small></div>
+        <div class="form-actions"><button class="secondary-button" type="button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">Salvar operação</button></div>
+      </form>`;
+  }
+
+  function renderForexHistoryModal() {
+    const trades = forexTradesNewestFirst();
+    return `<div class="modal-head"><h2>Histórico de Forex</h2><button class="close-button" type="button" data-action="close-modal" aria-label="Fechar">x</button></div>
+      ${trades.length ? `<div class="form-grid">${trades.map(item => `<div class="debt-progress">
+        <div class="debt-progress-copy"><span>${escapeHtml(item.pair)} · ${formatShortDate(item.date)}</span><strong>${formatForexResult(number(item.result))}</strong></div>
+        <div class="row-actions">
+          <button class="small-action ghost" type="button" data-action="open-modal" data-modal="forexTrade" data-id="${escapeAttr(item.id)}">Editar</button>
+          <button class="small-action ghost" type="button" data-action="delete-forex-trade" data-id="${escapeAttr(item.id)}">Excluir</button>
+        </div>
+      </div>`).join("")}</div>` : '<p class="empty-state">Nenhuma operação registrada.</p>'}`;
   }
 
   function renderReferralPage() {
@@ -7079,7 +7175,8 @@
     const actual = financingPropertyReceiptForMonth(item.id, month);
     const payment = state.paidCommitments?.[debtPaymentKey(item.id, month)];
     const thirdParty = payment?.method === "thirdParty";
-    const configured = receipt && month >= receipt.startMonth;
+    const saleProgress = propertySaleProgress(item, month);
+    const configured = propertyReceiptIsScheduled(receipt, month);
     const dueDate = configured ? dateInMonth(month, receipt.dueDay) : "";
     const received = actual ? convert(actual.amount, actual.currency, item.currency, latestRate(actual.date?.slice(0, 7) || month)) : thirdParty ? number(payment.amount) : 0;
     const kind = actual?.propertyReceiptKind || payment?.propertyReceiptKind || receipt?.kind;
@@ -7107,12 +7204,41 @@
           configured && !thirdParty && receipt.destination !== "direct" ? `<button class="small-action" type="button" data-action="open-modal" data-modal="financingReceipt" data-id="${escapeAttr(item.id)}">Registrar recebimento</button>` :
           configured && !thirdParty && !isDebtPaid(item.id, month) ? `<p>Abra Pagar e escolha Pago por terceiro para registrar o pagamento ao banco.</p>` : ""}
       </div>` : ""}
+      ${saleProgress ? `<div class="debt-progress">
+        <div class="debt-progress-copy"><span>Contrato de venda · ${money(receipt.amount)} por mês</span><strong>${saleProgress.paid}/${receipt.termMonths} parcelas</strong></div>
+        <div class="debt-progress-track" aria-hidden="true"><div class="debt-progress-fill" style="width:${saleProgress.percent}%"></div></div>
+        <p>Término previsto em ${escapeHtml(formatMonthLabel(saleProgress.endMonth))} · ${receipt.termMonths - saleProgress.paid} parcelas a registrar</p>
+      </div>` : ""}
       <div class="row-actions"><button class="small-action ghost" type="button" data-action="open-modal" data-modal="financingLinks" data-id="${escapeAttr(item.id)}">${renovation || receipt ? "Editar vínculos do imóvel" : "Vincular reforma ou recebimento"}</button></div>
     </div>`;
   }
 
   function financingPropertyReceiptForMonth(debtId, month) {
     return (state.transactions || []).find(row => row.type === "income" && row.propertyReceiptDebtId === debtId && row.propertyReceiptMonth === month);
+  }
+
+  function propertyReceiptIsScheduled(receipt, month) {
+    return Boolean(receipt && month >= receipt.startMonth &&
+      (receipt.kind !== "sale" || !receipt.termMonths || monthDiff(receipt.startMonth, month) < receipt.termMonths));
+  }
+
+  function propertySaleProgress(item, month) {
+    const receipt = item.propertyReceipt;
+    if (receipt?.kind !== "sale" || !receipt.termMonths) return null;
+    const endMonth = addMonths(receipt.startMonth, receipt.termMonths - 1);
+    const confirmed = new Set();
+    for (const row of state.transactions || []) {
+      if (row.type === "income" && row.propertyReceiptDebtId === item.id && row.propertyReceiptKind === "sale" &&
+          row.propertyReceiptMonth <= month && propertyReceiptIsScheduled(receipt, row.propertyReceiptMonth)) {
+        confirmed.add(row.propertyReceiptMonth);
+      }
+    }
+    for (const [key, payment] of Object.entries(state.paidCommitments || {})) {
+      const reference = key.slice(0, 7);
+      if (payment?.method === "thirdParty" && payment.propertyReceiptKind === "sale" && key === debtPaymentKey(item.id, reference) &&
+          reference <= month && propertyReceiptIsScheduled(receipt, reference)) confirmed.add(reference);
+    }
+    return { endMonth, paid: confirmed.size, percent: Math.round(confirmed.size / receipt.termMonths * 100) };
   }
 
   function renderRenovationLink(selected = "") {
@@ -9862,6 +9988,9 @@
       debt: renderDebtModal,
       consortium: renderConsortiumModal,
       investment: renderInvestmentModal,
+      forexGoal: renderForexGoalModal,
+      forexTrade: renderForexTradeModal,
+      forexHistory: renderForexHistoryModal,
       nubankBox: renderNubankBoxModal,
       nubankBoxContribution: renderNubankBoxContributionModal,
       creditCard: renderCreditCardModal,
@@ -12727,6 +12856,10 @@
           <div class="field"><label for="propertyReceiptDay">Dia previsto</label><input id="propertyReceiptDay" name="receiptDay" type="number" min="1" max="31" value="${escapeAttr(receipt?.dueDay || "")}" /></div>
           <div class="field"><label for="propertyReceiptStart">Primeiro mês</label><input id="propertyReceiptStart" name="receiptStart" type="month" value="${escapeAttr(receipt?.startMonth || state.ui.selectedMonth)}" /></div>
         </div>
+        <div id="propertyReceiptTermField" ${receipt?.kind === "sale" ? "" : "hidden"}><div class="field"><label for="propertyReceiptTerm">Prazo do contrato de venda (meses)</label>
+          <input id="propertyReceiptTerm" name="receiptTermMonths" type="number" min="1" max="1200" step="1" value="${escapeAttr(receipt?.termMonths ?? "")}" />
+          <small class="field-hint">Ao informar o prazo da venda, a previsão termina no último mês do contrato.</small>
+        </div></div>
         <div class="two-cols">
           <div class="field"><label for="propertyReceiptDestination">Destino</label><select id="propertyReceiptDestination" name="destination">
             <option value="bank">Minha conta</option><option value="direct" ${selectedAttr("direct", receipt?.destination)}>Direto ao banco do financiamento</option></select></div>
@@ -12740,7 +12873,7 @@
   function renderFinancingReceiptModal(item) {
     const receipt = item?.propertyReceipt;
     const month = state.ui.selectedMonth;
-    if (!receipt || receipt.destination === "direct" || month < receipt.startMonth || financingPropertyReceiptForMonth(item.id, month)) return "";
+    if (!propertyReceiptIsScheduled(receipt, month) || receipt.destination === "direct" || financingPropertyReceiptForMonth(item.id, month)) return "";
     return `<div class="modal-head"><h2>Registrar recebimento do imóvel</h2><button class="close-button" type="button" data-action="close-modal" aria-label="Fechar">x</button></div>
       <form class="form-grid" data-form="financing-receipt">
         ${editHidden(item)}
@@ -13466,8 +13599,13 @@
         return;
       }
       const destination = data.destination === "direct" ? "direct" : "bank";
+      const termMonths = data.receiptKind === "sale" && data.receiptTermMonths ? Number(data.receiptTermMonths) : null;
+      if (termMonths !== null && (!Number.isInteger(termMonths) || termMonths < 1 || termMonths > 1200)) {
+        showToast("Informe um prazo de venda entre 1 e 1.200 meses.");
+        return;
+      }
       propertyReceipt = { kind: data.receiptKind, payer: String(data.payer || "").trim(), amount, dueDay,
-        startMonth: data.receiptStart, destination, bankAccountId: destination === "bank" ? data.bankAccountId || "" : "" };
+        startMonth: data.receiptStart, termMonths, destination, bankAccountId: destination === "bank" ? data.bankAccountId || "" : "" };
     }
     upsertItem("debts", item.id, { renovation, propertyReceipt });
     saveState();
@@ -13482,7 +13620,7 @@
     const receipt = item?.propertyReceipt;
     const month = data.referenceMonth;
     if (item?.type !== "financing" || !receipt || receipt.destination !== "bank" ||
-        !/^\d{4}-(0[1-9]|1[0-2])$/.test(month || "") || month < receipt.startMonth) return;
+        !/^\d{4}-(0[1-9]|1[0-2])$/.test(month || "") || !propertyReceiptIsScheduled(receipt, month)) return;
     if (financingPropertyReceiptForMonth(item.id, month) || state.paidCommitments?.[debtPaymentKey(item.id, month)]?.method === "thirdParty") {
       showToast("Este recebimento já foi registrado para o mês.");
       return;
@@ -13575,6 +13713,43 @@
     closeModal();
     render();
     showToast(updated ? "Contrato atualizado." : "Contrato salvo.");
+  }
+
+  function isForexDate(value) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value || "")) return false;
+    const date = new Date(`${value}T00:00:00Z`);
+    return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value;
+  }
+
+  function saveForexGoal(form) {
+    const { target: inputTarget, startDate } = formData(form);
+    const target = Number(inputTarget);
+    if (!Number.isSafeInteger(target) || target <= 0 || !isForexDate(startDate)) {
+      showToast("Informe uma meta positiva em ienes e uma data de início válida.");
+      return;
+    }
+    state.forexGoal = { target, startDate, updatedAt: new Date().toISOString() };
+    saveState();
+    closeModal();
+    render();
+    showToast("Meta de Forex salva.");
+  }
+
+  function saveForexTrade(form) {
+    const data = formData(form);
+    const pair = String(data.pair || "").toUpperCase().replace(/[\s/-]/g, "");
+    const result = Number(data.result);
+    if (!/^[A-Z]{6}$/.test(pair) || pair.slice(0, 3) === pair.slice(3)
+        || !isForexDate(data.date) || data.date > localDateKey() || !String(data.result ?? "").trim() || !Number.isSafeInteger(result)) {
+      showToast("Confira o par, a data e o resultado líquido em ienes inteiros.");
+      return;
+    }
+    const updated = upsertItem("forexTrades", data.id, { pair: `${pair.slice(0, 3)}/${pair.slice(3)}`, date: data.date, result }, true);
+    saveState();
+    closeModal();
+    render();
+    if (updated) openModal("forexHistory");
+    showToast(updated ? "Operação atualizada." : "Operação registrada.");
   }
 
   function saveInvestment(form) {
@@ -14496,7 +14671,8 @@
     };
 
     if (thirdParty) {
-      state.paidCommitments[key].propertyReceiptKind = findItem("debts", target.id)?.propertyReceipt?.kind || "";
+      const receipt = findItem("debts", target.id)?.propertyReceipt;
+      state.paidCommitments[key].propertyReceiptKind = propertyReceiptIsScheduled(receipt, target.month) ? receipt.kind : "";
       state.paidCommitments[key].paymentDate = data.date;
       saveState();
       closeModal();
@@ -20648,6 +20824,7 @@
       financingReceipt: "debts",
       consortium: "debts",
       investment: "investments",
+      forexTrade: "forexTrades",
       nubankBox: "nubankBoxes",
       creditCard: "creditCards",
       cardPurchase: "cardPurchases",
