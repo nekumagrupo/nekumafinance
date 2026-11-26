@@ -463,7 +463,7 @@
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./service-worker.js?v=317")
+      navigator.serviceWorker.register("./service-worker.js?v=318")
         .then((registration) => registration.update().catch(() => {}))
         .catch(() => {});
     });
@@ -7209,6 +7209,7 @@
         <div class="debt-progress-track" aria-hidden="true"><div class="debt-progress-fill" style="width:${saleProgress.percent}%"></div></div>
         <p>Término previsto em ${escapeHtml(formatMonthLabel(saleProgress.endMonth))} · ${receipt.termMonths - saleProgress.paid} parcelas a registrar</p>
       </div>` : ""}
+      ${receipt?.kind === "sale" && !receipt.termMonths ? `<p class="row-meta">Informe o prazo em meses nos vínculos do imóvel para exibir o progresso da venda.</p>` : ""}
       <div class="row-actions"><button class="small-action ghost" type="button" data-action="open-modal" data-modal="financingLinks" data-id="${escapeAttr(item.id)}">${renovation || receipt ? "Editar vínculos do imóvel" : "Vincular reforma ou recebimento"}</button></div>
     </div>`;
   }
@@ -7228,17 +7229,18 @@
     const endMonth = addMonths(receipt.startMonth, receipt.termMonths - 1);
     const confirmed = new Set();
     for (const row of state.transactions || []) {
-      if (row.type === "income" && row.propertyReceiptDebtId === item.id && row.propertyReceiptKind === "sale" &&
+      if (row.type === "income" && row.propertyReceiptDebtId === item.id && (!row.propertyReceiptKind || row.propertyReceiptKind === "sale") &&
           row.propertyReceiptMonth <= month && propertyReceiptIsScheduled(receipt, row.propertyReceiptMonth)) {
         confirmed.add(row.propertyReceiptMonth);
       }
     }
     for (const [key, payment] of Object.entries(state.paidCommitments || {})) {
       const reference = key.slice(0, 7);
-      if (payment?.method === "thirdParty" && payment.propertyReceiptKind === "sale" && key === debtPaymentKey(item.id, reference) &&
+      const belongsToSale = payment?.propertyReceiptKind === "sale" || (!payment?.propertyReceiptKind && receipt.destination === "direct");
+      if (payment?.method === "thirdParty" && belongsToSale && key === debtPaymentKey(item.id, reference) &&
           reference <= month && propertyReceiptIsScheduled(receipt, reference)) confirmed.add(reference);
     }
-    return { endMonth, paid: confirmed.size, percent: Math.round(confirmed.size / receipt.termMonths * 100) };
+    return { endMonth, paid: confirmed.size, percent: confirmed.size / receipt.termMonths * 100 };
   }
 
   function renderRenovationLink(selected = "") {
