@@ -462,7 +462,7 @@
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./service-worker.js?v=315")
+      navigator.serviceWorker.register("./service-worker.js?v=316")
         .then((registration) => registration.update().catch(() => {}))
         .catch(() => {});
     });
@@ -788,6 +788,8 @@
     if (formType === "transfer") saveTransfer(form);
     if (formType === "commitment") saveCommitment(form);
     if (formType === "debt") saveDebt(form);
+    if (formType === "financing-links") saveFinancingLinks(form);
+    if (formType === "financing-receipt") saveFinancingReceipt(form);
     if (formType === "investment") saveInvestment(form);
     if (formType === "nubank-box") saveNubankBox(form);
     if (formType === "nubank-box-contribution") saveNubankBoxContribution(form);
@@ -7036,6 +7038,7 @@
                 <p>${progress.paid} pagas - ${progress.remaining} restantes</p>
                 ${item.type === "financing" ? renderFinancingPaymentBreakdown(item, progress.paid, progressPercent) : ""}
               </div>
+              ${item.type === "financing" ? renderFinancingLinks(item, state.ui.selectedMonth) : ""}
               <div class="row-actions">
                 <button class="small-action ${paid ? "ghost" : ""}" type="button" data-action="${paid ? "none" : "open-modal"}" data-modal="monthlyPayment" data-payment-id="debt:${item.id}">${paid ? "Pago" : "Pagar"}</button>
                 <button class="small-action ghost" type="button" data-action="open-modal" data-modal="debt" data-id="${item.id}">Editar</button>
@@ -7046,6 +7049,79 @@
         }).join("")}
       </div>
     `;
+  }
+
+  function renderFinancingLinks(item, month) {
+    const renovation = item.renovation;
+    const receipt = item.propertyReceipt;
+    const expenses = (state.transactions || []).filter(row => row.renovationDebtId === item.id && row.type === "expense" && row.date?.slice(0, 7) <= month);
+    const purchases = (state.cardPurchases || []).filter(row => row.renovationDebtId === item.id && row.purchaseDate?.slice(0, 7) <= month);
+    let paid = 0;
+    let unpaid = number(renovation?.unlinkedCommitments);
+    const expenseRows = expenses.map(row => {
+      paid += convert(row.amount, row.currency, item.currency, latestRate(row.date.slice(0, 7)));
+      return { row, modal: "transaction", amount: row.amount, status: "Pago" };
+    });
+    const purchaseRows = purchases.map(row => {
+      const count = clamp(Math.round(number(row.installments)), 1, 60);
+      const firstMonth = row.firstBillMonth || row.purchaseDate.slice(0, 7);
+      let settled = 0;
+      for (let index = 0; index < count; index++) {
+        const billMonth = addMonths(firstMonth, index);
+        if (billMonth <= month && isCardBillPaid(row.cardId, billMonth)) settled += installmentAmount(row.totalAmount, count, index);
+      }
+      const rate = latestRate(row.purchaseDate.slice(0, 7));
+      paid += convert(settled, row.currency, item.currency, rate);
+      unpaid += convert(Math.max(0, number(row.totalAmount) - settled), row.currency, item.currency, rate);
+      return { row, modal: "cardPurchase", amount: row.totalAmount, status: settled >= number(row.totalAmount) - 0.001 ? "Pago na fatura" : "No cartão" };
+    });
+    const money = amount => formatMoney(amount, item.currency);
+    const actual = financingPropertyReceiptForMonth(item.id, month);
+    const payment = state.paidCommitments?.[debtPaymentKey(item.id, month)];
+    const thirdParty = payment?.method === "thirdParty";
+    const configured = receipt && month >= receipt.startMonth;
+    const dueDate = configured ? dateInMonth(month, receipt.dueDay) : "";
+    const received = actual ? convert(actual.amount, actual.currency, item.currency, latestRate(actual.date?.slice(0, 7) || month)) : thirdParty ? number(payment.amount) : 0;
+    const kind = actual?.propertyReceiptKind || payment?.propertyReceiptKind || receipt?.kind;
+    const receiptLabel = kind === "rent" ? "Aluguel recebido" : kind === "sale" ? "Parcela da venda" : "Pagamento do imóvel";
+    const difference = received - debtNextPaymentAmount(item);
+    return `<div class="form-grid">
+      ${renovation ? `<details class="debt-progress" open>
+        <summary>Reforma · ${escapeHtml(renovation.name)}</summary>
+        <div class="debt-card-grid">
+          <div class="debt-card-stat"><span>Orçamento</span><strong>${money(renovation.budget)}</strong></div>
+          <div class="debt-card-stat"><span>Já pago</span><strong>${money(paid)}</strong></div>
+          <div class="debt-card-stat"><span>Contratado a pagar</span><strong>${money(unpaid)}</strong></div>
+          <div class="debt-card-stat"><span>Saldo do orçamento</span><strong>${money(number(renovation.budget) - paid - unpaid)}</strong></div>
+        </div>
+        ${[...expenseRows, ...purchaseRows].map(({ row, modal, amount, status }) => `<div class="debt-progress-copy">
+          <span>${escapeHtml(row.title)} · ${escapeHtml(row.category || "Reforma")} · ${status} · ${formatMoney(amount, row.currency)}</span>
+          <button class="small-action ghost" type="button" data-action="open-modal" data-modal="${modal}" data-id="${escapeAttr(row.id)}">Editar</button></div>`).join("")}
+        <p>Vincule uma despesa ou compra no cartão pelo campo Reforma do imóvel.</p>
+      </details>` : ""}
+      ${configured || actual || thirdParty ? `<div class="debt-progress">
+        <div class="debt-progress-copy"><span>${receiptLabel}${receipt?.payer ? ` · ${escapeHtml(receipt.payer)}` : ""}</span>
+          <strong>${actual ? "Recebido" : thirdParty ? "Pago por terceiro" : dueDate < localDateKey() ? "Em atraso" : "Previsto"}</strong></div>
+        <p>${actual || thirdParty ? `${money(received)} · ${difference < 0 ? "Faltou para cobrir a parcela" : "Diferença após a parcela"} ${money(Math.abs(difference))}` : `${money(receipt.amount)} · previsto para ${formatShortDate(dueDate)}`}</p>
+        ${actual ? `<button class="small-action ghost" type="button" data-action="open-modal" data-modal="transaction" data-id="${escapeAttr(actual.id)}">Editar recebimento</button>` :
+          configured && !thirdParty && receipt.destination !== "direct" ? `<button class="small-action" type="button" data-action="open-modal" data-modal="financingReceipt" data-id="${escapeAttr(item.id)}">Registrar recebimento</button>` :
+          configured && !thirdParty && !isDebtPaid(item.id, month) ? `<p>Abra Pagar e escolha Pago por terceiro para registrar o pagamento ao banco.</p>` : ""}
+      </div>` : ""}
+      <div class="row-actions"><button class="small-action ghost" type="button" data-action="open-modal" data-modal="financingLinks" data-id="${escapeAttr(item.id)}">${renovation || receipt ? "Editar vínculos do imóvel" : "Vincular reforma ou recebimento"}</button></div>
+    </div>`;
+  }
+
+  function financingPropertyReceiptForMonth(debtId, month) {
+    return (state.transactions || []).find(row => row.type === "income" && row.propertyReceiptDebtId === debtId && row.propertyReceiptMonth === month);
+  }
+
+  function renderRenovationLink(selected = "") {
+    const renovations = (state.debts || []).filter(item => item.type === "financing" && item.renovation);
+    if (!renovations.length && !selected) return "";
+    return `<div class="field renovation-link-field"><label for="renovationDebtId">Reforma do imóvel</label>
+      <select id="renovationDebtId" name="renovationDebtId"><option value="">Sem vínculo</option>
+        ${renovations.map(item => `<option value="${escapeAttr(item.id)}" ${selectedAttr(item.id, selected)}>${escapeHtml(item.title)} · ${escapeHtml(item.renovation.name)}</option>`).join("")}
+      </select></div>`;
   }
 
   function renderFinancingPaymentBreakdown(item, paidInstallments, progressPercent) {
@@ -9812,6 +9888,8 @@
       salaryReceipt: renderSalaryReceiptModal,
       salaryDetails: renderSalaryDetailsModal,
       monthlyPayment: renderMonthlyPaymentModal,
+      financingLinks: renderFinancingLinksModal,
+      financingReceipt: renderFinancingReceiptModal,
       subscription: renderSubscriptionModal,
       manageSubscriptions: () => `<div class="modal-head"><h2>Gerenciar subscrições</h2>
         <button class="close-button" type="button" data-action="close-modal" aria-label="Fechar">x</button></div>${renderSubscriptionsPanel(null, true)}`,
@@ -10171,6 +10249,7 @@
             ${familyMemberOptions(item?.familyMemberId)}
           </select>
         </div>` : `<input type="hidden" name="familyMemberId" value="${escapeAttr(item?.familyMemberId || "")}" />`}
+        ${renderRenovationLink(item?.renovationDebtId)}
         <div class="field">
           <label for="note">Observacao</label>
           <textarea id="note" name="note">${escapeHtml(item?.note || "")}</textarea>
@@ -11304,6 +11383,7 @@
             <input id="purchaseNote" name="note" placeholder="Opcional" value="${escapeAttr(item?.note || "")}" />
           </div>
         </div>
+        ${renderRenovationLink(item?.renovationDebtId)}
         <div class="form-actions">
           <button class="secondary-button" type="button" data-action="close-modal">Cancelar</button>
           <button class="primary-button" type="submit">Salvar compra</button>
@@ -12620,6 +12700,62 @@
     return { housing, deductions: { ...original, ...amounts, configured: original.configured || hasAmounts, entries, total, net: Math.max(0, number(target.grossAmount) - total) } };
   }
 
+  function renderFinancingLinksModal(item) {
+    if (item?.type !== "financing") return "";
+    const renovation = item.renovation;
+    const receipt = item.propertyReceipt;
+    const step = item.currency === "JPY" ? "1" : ".01";
+    return `<div class="modal-head"><h2>Vínculos do imóvel</h2><button class="close-button" type="button" data-action="close-modal" aria-label="Fechar">x</button></div>
+      <form class="form-grid" data-form="financing-links">
+        ${editHidden(item)}
+        <p class="row-meta">${escapeHtml(item.title)} · ${escapeHtml(item.currency)}</p>
+        <h3>Reforma</h3>
+        <div class="field"><label for="renovationName">Nome da reforma (opcional)</label><input id="renovationName" name="renovationName" value="${escapeAttr(renovation?.name || "")}" /></div>
+        <div class="two-cols">
+          <div class="field"><label for="renovationBudget">Orçamento total</label><input id="renovationBudget" name="renovationBudget" type="number" min="0" step="${step}" value="${escapeAttr(renovation?.budget ?? "")}" /></div>
+          <div class="field"><label for="renovationCommitments">Contratado a pagar fora do cartão</label><input id="renovationCommitments" name="renovationCommitments" type="number" min="0" step="${step}" value="${escapeAttr(renovation?.unlinkedCommitments ?? "")}" /><small>Atualize esse valor ao vincular um pagamento para que ele seja contado uma única vez.</small></div>
+        </div>
+        <h3>Recebimento mensal</h3>
+        <div class="two-cols">
+          <div class="field"><label for="propertyReceiptKind">Tipo</label><select id="propertyReceiptKind" name="receiptKind">
+            <option value="">Sem previsão mensal</option><option value="sale" ${selectedAttr("sale", receipt?.kind)}>Parcela da venda</option>
+            <option value="rent" ${selectedAttr("rent", receipt?.kind)}>Aluguel recebido</option></select></div>
+          <div class="field"><label for="propertyReceiptPayer">Quem paga</label><input id="propertyReceiptPayer" name="payer" value="${escapeAttr(receipt?.payer || "")}" /></div>
+        </div>
+        <div class="three-cols">
+          <div class="field"><label for="propertyReceiptAmount">Valor mensal</label><input id="propertyReceiptAmount" name="receiptAmount" type="number" min="0" step="${step}" value="${escapeAttr(receipt?.amount ?? "")}" /></div>
+          <div class="field"><label for="propertyReceiptDay">Dia previsto</label><input id="propertyReceiptDay" name="receiptDay" type="number" min="1" max="31" value="${escapeAttr(receipt?.dueDay || "")}" /></div>
+          <div class="field"><label for="propertyReceiptStart">Primeiro mês</label><input id="propertyReceiptStart" name="receiptStart" type="month" value="${escapeAttr(receipt?.startMonth || state.ui.selectedMonth)}" /></div>
+        </div>
+        <div class="two-cols">
+          <div class="field"><label for="propertyReceiptDestination">Destino</label><select id="propertyReceiptDestination" name="destination">
+            <option value="bank">Minha conta</option><option value="direct" ${selectedAttr("direct", receipt?.destination)}>Direto ao banco do financiamento</option></select></div>
+          <div class="field"><label for="propertyReceiptAccount">Minha conta de destino</label><select id="propertyReceiptAccount" name="bankAccountId">
+            ${bankAccountSelectOptions(item.country, receipt?.bankAccountId, "Selecione se receber na sua conta")}</select></div>
+        </div>
+        <div class="form-actions"><button class="secondary-button" type="button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">Salvar vínculos</button></div>
+      </form>`;
+  }
+
+  function renderFinancingReceiptModal(item) {
+    const receipt = item?.propertyReceipt;
+    const month = state.ui.selectedMonth;
+    if (!receipt || receipt.destination === "direct" || month < receipt.startMonth || financingPropertyReceiptForMonth(item.id, month)) return "";
+    return `<div class="modal-head"><h2>Registrar recebimento do imóvel</h2><button class="close-button" type="button" data-action="close-modal" aria-label="Fechar">x</button></div>
+      <form class="form-grid" data-form="financing-receipt">
+        ${editHidden(item)}
+        <p class="row-meta">${escapeHtml(item.title)} · ${escapeHtml(formatMonthLabel(month))} · ${escapeHtml(item.currency)}</p>
+        <input type="hidden" name="referenceMonth" value="${escapeAttr(month)}" />
+        <div class="two-cols">
+          <div class="field"><label for="propertyActualAmount">Valor recebido</label><input id="propertyActualAmount" name="amount" type="number" required min="${item.currency === "JPY" ? "1" : ".01"}" step="${item.currency === "JPY" ? "1" : ".01"}" value="${receipt.amount}" /></div>
+          <div class="field"><label for="propertyActualDate">Data em que recebeu</label><input id="propertyActualDate" name="date" type="date" required max="${localDateKey()}" value="${localDateKey()}" /></div>
+        </div>
+        <div class="field"><label for="propertyActualBank">Conta que recebeu</label><select id="propertyActualBank" name="bankAccountId" required>
+          ${bankAccountSelectOptions(item.country, receipt.bankAccountId, "Selecione a conta")}</select></div>
+        <div class="form-actions"><button class="secondary-button" type="button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">Confirmar recebimento</button></div>
+      </form>`;
+  }
+
   function renderMonthlyPaymentModal(paymentRef = "") {
     const target = paymentTargetFromRef(paymentRef);
     if (!target) {
@@ -12663,12 +12799,13 @@
               <option value="pix" ${selectedAttr("pix", target.paymentMethod)}>Pix</option>
               <option value="bank" ${selectedAttr("bank", target.paymentMethod)}>Debito em conta</option>
               ${target.kind === "card" ? "" : `<option value="card" ${selectedAttr("card", target.paymentMethod)}>Cartão de crédito</option>`}
+              ${target.financing ? `<option value="thirdParty" ${selectedAttr("thirdParty", findItem("debts", target.id)?.propertyReceipt?.destination === "direct" ? "thirdParty" : "")}>Pago por terceiro</option>` : ""}
               <option value="kombini" ${selectedAttr("kombini", target.paymentMethod)}>Kombini</option>
               <option value="cash" ${selectedAttr("cash", target.paymentMethod)}>Dinheiro</option>
               <option value="other" ${selectedAttr("other", target.paymentMethod)}>Outro</option>
             </select>
           </div>
-          <div class="field">
+          <div class="field monthly-payment-source-field">
             <label for="monthlyPaymentSource">Origem</label>
             <select id="monthlyPaymentSource" name="sourceId">
               <option value="">Saldo geral</option>
@@ -12794,6 +12931,11 @@
 
   function saveTransaction(form) {
     const data = formData(form);
+    const current = findItem("transactions", data.id);
+    if (current?.propertyReceiptDebtId && data.type !== "income") {
+      showToast("Um recebimento do imóvel deve continuar como entrada.");
+      return;
+    }
     const entry = applyAutomaticClassification({
       date: data.date,
       country: data.country,
@@ -12805,6 +12947,7 @@
       bankAccountId: data.bankAccountId || "",
       receiptMethod: data.receiptMethod || "",
       familyMemberId: data.familyMemberId || "",
+      renovationDebtId: data.type === "expense" && findItem("debts", data.renovationDebtId)?.renovation ? data.renovationDebtId : "",
       note: data.note.trim()
     });
     const updated = upsertItem("transactions", data.id, entry, true);
@@ -13305,6 +13448,65 @@
     showToast(updated ? "Conta fixa atualizada." : "Conta fixa salva.");
   }
 
+  function saveFinancingLinks(form) {
+    const data = formData(form);
+    const item = findItem("debts", data.id);
+    if (item?.type !== "financing") return;
+    const name = String(data.renovationName || "").trim();
+    const budget = number(data.renovationBudget);
+    const unlinkedCommitments = number(data.renovationCommitments);
+    const renovation = name || budget > 0 || unlinkedCommitments > 0
+      ? { name: name || "Reforma do imóvel", budget, unlinkedCommitments } : null;
+    let propertyReceipt = null;
+    if (["sale", "rent"].includes(data.receiptKind)) {
+      const amount = number(data.receiptAmount);
+      const dueDay = number(data.receiptDay);
+      if (!(amount > 0) || !Number.isInteger(dueDay) || dueDay < 1 || dueDay > 31 || !/^\d{4}-(0[1-9]|1[0-2])$/.test(data.receiptStart || "")) {
+        showToast("Informe valor, dia previsto e primeiro mês do recebimento.");
+        return;
+      }
+      const destination = data.destination === "direct" ? "direct" : "bank";
+      propertyReceipt = { kind: data.receiptKind, payer: String(data.payer || "").trim(), amount, dueDay,
+        startMonth: data.receiptStart, destination, bankAccountId: destination === "bank" ? data.bankAccountId || "" : "" };
+    }
+    upsertItem("debts", item.id, { renovation, propertyReceipt });
+    saveState();
+    closeModal();
+    render();
+    showToast("Vínculos do imóvel salvos.");
+  }
+
+  function saveFinancingReceipt(form) {
+    const data = formData(form);
+    const item = findItem("debts", data.id);
+    const receipt = item?.propertyReceipt;
+    const month = data.referenceMonth;
+    if (item?.type !== "financing" || !receipt || receipt.destination !== "bank" ||
+        !/^\d{4}-(0[1-9]|1[0-2])$/.test(month || "") || month < receipt.startMonth) return;
+    if (financingPropertyReceiptForMonth(item.id, month) || state.paidCommitments?.[debtPaymentKey(item.id, month)]?.method === "thirdParty") {
+      showToast("Este recebimento já foi registrado para o mês.");
+      return;
+    }
+    const bank = activeBankAccounts().find(account => account.id === data.bankAccountId);
+    const amount = number(data.amount);
+    if (!bank || amount <= 0 || !/^\d{4}-\d{2}-\d{2}$/.test(data.date || "") || data.date > localDateKey()) {
+      showToast("Confira o valor, a data e a conta que recebeu.");
+      return;
+    }
+    const category = receipt.kind === "rent" ? "Aluguel recebido" : "Parcela da venda";
+    const id = `tx_property_${item.id}_${month}`;
+    const newId = state.deletedItems?.transactions?.[id] ? "" : id;
+    upsertItem("transactions", newId, {
+      date: data.date, country: bank.country, type: "income", title: `${category} · ${item.title}`,
+      category, amount, currency: item.currency, bankAccountId: bank.id, propertyReceiptDebtId: item.id,
+      propertyReceiptMonth: month, propertyReceiptKind: receipt.kind
+    }, true);
+    saveState();
+    closeModal();
+    render();
+    showToast("Recebimento do imóvel registrado.");
+  }
+
   function saveDebt(form) {
     const data = formData(form);
     const current = findItem("debts", data.id);
@@ -13499,6 +13701,7 @@
       purchaseDate: data.purchaseDate,
       familyMemberId: data.familyMemberId || "",
       interestAmount: Math.max(0, number(data.interestAmount)),
+      renovationDebtId: findItem("debts", data.renovationDebtId)?.renovation ? data.renovationDebtId : "",
       note: data.note.trim()
     }, true);
     state.ui.selectedMonth = firstBillMonth;
@@ -14252,7 +14455,16 @@
     }
 
     const paymentMethod = data.paymentMethod || "balance";
-    const bankAccountId = data.bankAccountId || target.bankAccountId || "";
+    const thirdParty = paymentMethod === "thirdParty";
+    if (thirdParty && (!target.financing || financingPropertyReceiptForMonth(target.id, target.month))) {
+      showToast("Confira se já existe um recebimento deste imóvel no mês.");
+      return;
+    }
+    if (thirdParty && (!data.date || data.date > localDateKey())) {
+      showToast("Informe a data em que o terceiro pagou ao banco.");
+      return;
+    }
+    const bankAccountId = thirdParty ? "" : data.bankAccountId || target.bankAccountId || "";
     const creditCard = paymentMethod === "card" ? creditCardById(data.cardId) : null;
     if (paymentMethod === "bank" && !bankAccountId) {
       showToast("Selecione a conta bancária usada no pagamento.");
@@ -14274,7 +14486,7 @@
       ...(previousPayment || {}),
       paidAt: new Date().toISOString(),
       method: paymentMethod,
-      sourceId: data.sourceId || "",
+      sourceId: thirdParty ? "" : data.sourceId || "",
       bankAccountId: paymentMethod === "card" ? "" : bankAccountId,
       cardId: creditCard?.id || "",
       note: String(data.note || "").trim(),
@@ -14283,6 +14495,15 @@
       status: accumulatedAmount >= number(target.amount) - Math.max(target.currency === "JPY" ? 1 : .01, number(target.amount) * .005) ? "paid" : "partial"
     };
 
+    if (thirdParty) {
+      state.paidCommitments[key].propertyReceiptKind = findItem("debts", target.id)?.propertyReceipt?.kind || "";
+      state.paidCommitments[key].paymentDate = data.date;
+      saveState();
+      closeModal();
+      render();
+      showToast("Parcela marcada como paga por terceiro.");
+      return;
+    }
     const author = currentUserAuthor();
     if (creditCard) {
       state.cardPurchases.unshift({
@@ -14546,6 +14767,7 @@
         paymentKey: debtPaymentKey(id, month),
         country: item.country,
         type: consortium ? "consortium" : "debt",
+        financing: item.type === "financing",
         title: item.title,
         transactionTitle: `Parcela ${item.title}`,
         category: consortium ? "Consórcio" : "Financiamento",
@@ -14652,6 +14874,7 @@
       pix: "Pix",
       bank: "debito em conta",
       company: "desconto pela empresa",
+      thirdParty: "pago por terceiro",
       card: "cartao",
       kombini: "kombini",
       cash: "dinheiro",
@@ -14732,8 +14955,10 @@
     const cardField = modalRoot.querySelector(".monthly-payment-card-field");
     const bankField = modalRoot.querySelector(".monthly-payment-bank-field");
     const cardSelect = modalRoot.querySelector("#monthlyPaymentCardId");
+    const sourceField = modalRoot.querySelector(".monthly-payment-source-field");
+    if (sourceField) sourceField.classList.toggle("is-hidden", method === "thirdParty");
     if (cardField) cardField.classList.toggle("is-hidden", method !== "card");
-    if (bankField) bankField.classList.toggle("is-hidden", method === "card");
+    if (bankField) bankField.classList.toggle("is-hidden", method === "card" || method === "thirdParty");
     if (cardSelect) cardSelect.required = method === "card";
   }
 
@@ -18871,6 +19096,8 @@
     const accountSelect = form.elements.bankAccountId;
     const methodSelect = form.elements.receiptMethod;
     const methodLabel = form.querySelector(".transaction-method-field label");
+    const renovationField = form.querySelector(".renovation-link-field");
+    if (renovationField) renovationField.classList.toggle("is-hidden", type !== "expense");
     if (accountSelect) accountSelect.innerHTML = bankAccountSelectOptions(country, accountSelect.value, "Sem conta vinculada");
     if (methodSelect) methodSelect.innerHTML = receiptMethodOptions(country, methodSelect.value, type);
     if (methodLabel) methodLabel.textContent = type === "income" ? "Modo de recebimento" : "Forma de pagamento";
@@ -20417,6 +20644,8 @@
       transfer: "transfers",
       commitment: "commitments",
       debt: "debts",
+      financingLinks: "debts",
+      financingReceipt: "debts",
       consortium: "debts",
       investment: "investments",
       nubankBox: "nubankBoxes",
