@@ -26,6 +26,12 @@
   const firstAccessScreens = ["setup", "welcome", "bank", "income", "housing", "bank-saved", "income-saved", "medal", "trial-offer"];
   const outflowTypes = ["expense", "debt", "card", "consortium", "vehicle"];
   const allOutflowTypes = ["expense", "debt", "card", "consortium", "investment", "vehicle"];
+  const realEstateContractTypes = {
+    sale: { label: "Contrato de venda", field: "saleContractId" },
+    rent: { label: "Contrato de aluguel", field: "rentalContractId" },
+    renovation: { label: "Contrato de reforma", field: "renovationContractId" }
+  };
+  const renovationStageStatuses = { planned: "Previsto", committed: "Contratado", paid: "Pago" };
   const countryMeta = {
     brasil: { label: "Brasil", short: "BR", currency: "BRL", color: "#42a67a" },
     japao: { label: "Japao", short: "JP", currency: "JPY", color: "#f5c84c" },
@@ -464,7 +470,7 @@
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./service-worker.js?v=321")
+      navigator.serviceWorker.register("./service-worker.js?v=322")
         .then((registration) => registration.update().catch(() => {}))
         .catch(() => {});
     });
@@ -699,6 +705,7 @@
     if (action === "delete-bank-account") deleteItem("bankAccounts", button.dataset.id, "Conta bancaria removida.");
     if (action === "delete-subscription") deleteItem("subscriptions", button.dataset.id, "Subscricao removida.");
     if (action === "remove-financing-link") removeFinancingLink(button.dataset.id, button.dataset.link);
+    if (action === "delete-real-estate-contract") deleteRealEstateContract(button.dataset.id);
     if (action === "delete-forex-trade") {
       if (!hasHouseholdPermission("write")) return;
       deleteItem("forexTrades", button.dataset.id, "Operação removida.");
@@ -802,6 +809,8 @@
     if (formType === "forex-goal") saveForexGoal(form);
     if (formType === "forex-trade") saveForexTrade(form);
     if (formType === "sale-contract") saveSaleContract(form);
+    if (formType === "renovation-contract") saveRenovationContract(form);
+    if (formType === "renovation-stage") saveRenovationStage(form);
     if (formType === "sale-contract-link") saveSaleContractLink(form);
     if (formType === "sale-collection") saveSaleCollection(form, event.submitter?.dataset.saleMode);
     if (formType === "nubank-box") saveNubankBox(form);
@@ -4070,7 +4079,7 @@
     const today = localDateKey();
     const month = today.slice(0, 7);
     const sale = hasHouseholdPermission("write") && (state.saleContracts || []).find(item =>
-      propertyReceiptIsScheduled(item, month) && dateInMonth(month, item.dueDay) <= today &&
+      isPropertyIncomeContract(item) && propertyReceiptIsScheduled(item, month) && dateInMonth(month, item.dueDay) <= today &&
       !saleReceiptForMonth(item, month) && localStorage.getItem(`nekuma-sale-alert:${item.id}`) !== today);
     if (sale) {
       localStorage.setItem(`nekuma-sale-alert:${sale.id}`, today);
@@ -4398,7 +4407,7 @@
               <h2>Financiamentos</h2>
               <button class="small-action" type="button" data-action="open-modal" data-modal="debt">Novo contrato</button>
             </div>
-            ${renderDebtList("financing")}
+            ${renderDebtList("financing", false)}
           </section>
 
           <section class="content-panel consortium-home-panel">
@@ -4409,7 +4418,7 @@
               </div>
               <button class="small-action" type="button" data-action="open-modal" data-modal="consortium">Novo consórcio</button>
             </div>
-            ${renderConsortiumList()}
+            ${renderConsortiumList(false)}
           </section>
         </aside>
       </div>
@@ -5415,12 +5424,16 @@
           <div class="wealth-card-column">
             <article class="content-panel wealth-investments-card"><div class="panel-head"><h2>Investimentos</h2><button class="small-action" type="button" data-action="open-modal" data-modal="investment">Novo</button></div>${renderInvestmentList()}${hasNubankAccount() ? `<div class="nubank-boxes-inline">${renderNubankBoxesPanel()}</div>` : ""}</article>
             ${renderForexCard()}
-            ${renderSaleContractsPanel()}
+            ${renderRealEstateContractsPanel()}
             <article class="content-panel wealth-consortium-card"><div class="panel-head"><h2>Consorcios</h2><button class="small-action" type="button" data-action="open-modal" data-modal="consortium">Novo consorcio</button></div>${renderConsortiumList()}</article>
           </div>
         </section>
       </div>
     `;
+  }
+
+  function isPropertyIncomeContract(contract) {
+    return contract && (!contract.kind || contract.kind === "sale" || contract.kind === "rent");
   }
 
   function saleReceiptForMonth(sale, month) {
@@ -5429,15 +5442,17 @@
     const legacy = financingPropertyReceiptForMonth(sale.legacyDebtId, month);
     const historical = state.paidCommitments?.[propertyReceiptRecordKey(sale.legacyDebtId, month)];
     const payment = state.paidCommitments?.[debtPaymentKey(sale.legacyDebtId, month)];
-    if (legacy && legacy.propertyReceiptKind !== "rent") return legacy;
-    if (historical?.propertyReceiptKind === "sale") return historical;
-    if (payment?.method === "thirdParty" && (payment.propertyReceiptKind === "sale" ||
+    const kind = sale.kind || "sale";
+    if (legacy && (!legacy.propertyReceiptKind || legacy.propertyReceiptKind === kind)) return legacy;
+    if (historical?.propertyReceiptKind === kind) return historical;
+    if (payment?.method === "thirdParty" && (payment.propertyReceiptKind === kind ||
         (!payment.propertyReceiptKind && sale.legacyDestination === "direct"))) return payment;
     return null;
   }
 
   function saleAllocationRows(sale, month) {
-    return (state.debts || []).filter(debt => debt.saleContractId === sale.id && debt.currency === sale.currency &&
+    const field = realEstateContractTypes[sale.kind || "sale"].field;
+    return (state.debts || []).filter(debt => debt[field] === sale.id && debt.currency === sale.currency &&
       ["financing", "consortium"].includes(debt.type) && (isDebtPaid(debt.id, month) || isDebtActiveInMonth(debt, month)))
       .map(debt => {
         const payment = state.paidCommitments[debtPaymentKey(debt.id, month)];
@@ -5445,18 +5460,31 @@
       }).filter(row => number(row.amount) > 0);
   }
 
-  function renderSaleContractsPanel() {
+  function renderRealEstateContractsPanel() {
+    const contracts = state.saleContracts || [];
+    return `<article class="content-panel">
+      <div class="panel-head"><h2>Contratos Imobiliários</h2></div>
+      <div class="form-grid">
+        <section class="form-grid"><div class="panel-head"><h3>Vendas</h3><button class="small-action" type="button" data-action="open-modal" data-modal="saleContract">Nova venda</button></div>
+          ${renderPropertyIncomeContracts(contracts.filter(item => (item.kind || "sale") === "sale"))}</section>
+        <section class="form-grid"><div class="panel-head"><h3>Aluguéis</h3><button class="small-action" type="button" data-action="open-modal" data-modal="saleContract" data-id="new:rent">Novo aluguel</button></div>
+          ${renderPropertyIncomeContracts(contracts.filter(item => item.kind === "rent"))}</section>
+        <section class="form-grid"><div class="panel-head"><h3>Reformas</h3><button class="small-action" type="button" data-action="open-modal" data-modal="renovationContract">Nova reforma</button></div>
+          ${contracts.filter(item => item.kind === "renovation").map(renderRenovationContractCard).join("") || '<p class="empty-state">Nenhuma reforma cadastrada.</p>'}</section>
+      </div></article>`;
+  }
+
+  function renderPropertyIncomeContracts(contracts) {
     const month = state.ui.selectedMonth;
     const today = localDateKey();
     const current = today.slice(0, 7);
-    return `<article class="content-panel">
-      <div class="panel-head"><h2>Contratos de venda</h2><button class="small-action" type="button" data-action="open-modal" data-modal="saleContract">Novo contrato</button></div>
-      <div class="form-grid">${(state.saleContracts || []).map(sale => {
-        const end = addMonths(sale.startMonth, sale.termMonths - 1);
+    return contracts.map(sale => {
+        const end = sale.termMonths ? addMonths(sale.startMonth, sale.termMonths - 1) : "";
         const scheduled = propertyReceiptIsScheduled(sale, month);
         const receipt = scheduled ? saleReceiptForMonth(sale, month) : null;
         const registered = [];
-        for (let index = 0; index < sale.termMonths; index++) {
+        const elapsed = Math.max(0, monthDiff(sale.startMonth, current) + 1);
+        for (let index = 0; index < (sale.termMonths ? Math.min(sale.termMonths, elapsed) : elapsed); index++) {
           const reference = addMonths(sale.startMonth, index);
           const entry = saleReceiptForMonth(sale, reference);
           if (entry) registered.push({ reference, entry });
@@ -5468,8 +5496,9 @@
         const money = value => formatMoney(value, sale.currency);
         return `<section class="debt-progress">
           <div class="debt-progress-copy"><span>${escapeHtml(sale.payer)} · ${escapeHtml(sale.title)}</span><strong>${money(sale.amount)}/mês</strong></div>
-          <div class="debt-progress-track" aria-hidden="true"><div class="debt-progress-fill" style="width:${registered.length / sale.termMonths * 100}%"></div></div>
-          <p>${registered.length}/${sale.termMonths} parcelas recebidas · ${money(registered.reduce((total, row) => total + number(row.entry.amount), 0))} recebidos · término em ${escapeHtml(formatMonthLabel(end))}</p>
+          ${sale.termMonths ? `<div class="debt-progress-track" aria-hidden="true"><div class="debt-progress-fill" style="width:${registered.length / sale.termMonths * 100}%"></div></div>` : ""}
+          <p>${registered.length}${sale.termMonths ? `/${sale.termMonths}` : ""} parcelas recebidas · ${money(registered.reduce((total, row) => total + number(row.entry.amount), 0))} recebidos${end ? ` · término em ${escapeHtml(formatMonthLabel(end))}` : ""}</p>
+          <p>${escapeHtml(sale.receiptMethod || "Forma de recebimento não informada")}${sale.totalValue ? ` · Valor da venda ${money(sale.totalValue)}` : ""}${bankAccountById(sale.bankAccountId) ? ` · ${escapeHtml(bankAccountName(bankAccountById(sale.bankAccountId)))}` : ""}</p>
           ${scheduled ? `<p>${receipt ? "Recebido no mês" : `Previsto para ${formatShortDate(dateInMonth(month, sale.dueDay))}`}</p>
             ${rows.map(({ debt, amount, paid }) => `<p>${escapeHtml(debt.title)} · ${money(amount)} · ${paid ? "Pago" : "A pagar"}</p>`).join("")}
             ${rows.length ? `<p>Saldo após os destinos · ${money(number(receipt?.amount ?? sale.amount) - totalDestinations)}</p>` : ""}
@@ -5478,19 +5507,75 @@
           <div class="row-actions">
             ${scheduled && month <= current && (!receipt || rows.some(row => !row.paid)) ? `<button class="small-action" type="button" data-action="open-modal" data-modal="saleCollect" data-id="${escapeAttr(`${sale.id}|${month}`)}">${receipt ? "Registrar pagamentos" : "Confirmar recebimento"}</button>` : ""}
             <button class="small-action ghost" type="button" data-action="open-modal" data-modal="saleContract" data-id="${escapeAttr(sale.id)}">Editar</button>
+            <button class="small-action ghost" type="button" data-action="delete-real-estate-contract" data-id="${escapeAttr(sale.id)}">Excluir</button>
           </div>
         </section>`;
-      }).join("") || '<p class="empty-state">Cadastre o comprador e vincule o contrato a um financiamento ou consórcio.</p>'}</div>
-    </article>`;
+      }).join("") || '<p class="empty-state">Nenhum contrato cadastrado.</p>';
   }
 
-  function renderSaleContractLink(debt) {
-    const sale = findItem("saleContracts", debt.saleContractId);
-    return `<div class="row-actions">
-      ${sale ? `<span class="row-meta">Contrato de venda · ${escapeHtml(sale.payer)}</span>` : ""}
-      <button class="small-action ghost" type="button" data-action="open-modal" data-modal="saleContractLink" data-id="${escapeAttr(debt.id)}">${debt.saleContractId ? "Editar vínculo da venda" : "Vincular contrato de venda"}</button>
-      ${debt.saleContractId ? renderRemoveFinancingLinkButton(debt.id, "saleContractId", "Remover vínculo da venda") : ""}
-    </div>`;
+  function renderRealEstateLinksButton(debt) {
+    return `<button class="small-action ghost" type="button" data-action="open-modal" data-modal="realEstateLinks" data-id="${escapeAttr(debt.id)}">+ Vínculos</button>`;
+  }
+
+  function renovationContractTotals(contract) {
+    const totals = { planned: 0, committed: number(contract.legacyCommitments), paid: 0 };
+    for (const stage of contract.stages || []) {
+      if (Object.hasOwn(renovationStageStatuses, stage.status)) totals[stage.status] += number(stage.amount);
+    }
+    for (const row of state.transactions || []) {
+      if (row.type === "expense" && (row.renovationContractId === contract.id ||
+          (contract.legacyDebtId && row.renovationDebtId === contract.legacyDebtId))) {
+        totals.paid += convert(row.amount, row.currency, contract.currency, latestRate(row.date?.slice(0, 7)));
+      }
+    }
+    for (const row of state.cardPurchases || []) {
+      if (row.renovationContractId !== contract.id && (!contract.legacyDebtId || row.renovationDebtId !== contract.legacyDebtId)) continue;
+      const month = row.firstBillMonth || row.purchaseDate?.slice(0, 7);
+      const installments = clamp(Math.round(number(row.installments)), 1, 60);
+      let paid = 0;
+      for (let index = 0; month && index < installments; index++) {
+        const bill = addMonths(month, index);
+        if (bill <= currentMonth() && isCardBillPaid(row.cardId, bill)) paid += installmentAmount(row.totalAmount, installments, index);
+      }
+      const rate = latestRate(row.purchaseDate?.slice(0, 7));
+      totals.paid += convert(paid, row.currency, contract.currency, rate);
+      totals.committed += convert(Math.max(0, number(row.totalAmount) - paid), row.currency, contract.currency, rate);
+    }
+    return totals;
+  }
+
+  function renderRenovationContractCard(contract) {
+    const { planned, committed, paid } = renovationContractTotals(contract);
+    const money = value => formatMoney(value, contract.currency);
+    return `<section class="debt-progress">
+      <div class="debt-progress-copy"><span>${escapeHtml(contract.title)} · ${escapeHtml(contract.property)}</span><strong>${money(contract.budget)}</strong></div>
+      ${contract.endDate ? `<p>Conclusão prevista para ${formatShortDate(contract.endDate)}</p>` : ""}
+      <div class="debt-card-grid">
+        <div class="debt-card-stat"><span>Previsto</span><strong>${money(planned)}</strong></div>
+        <div class="debt-card-stat"><span>Contratado a pagar</span><strong>${money(committed)}</strong></div>
+        <div class="debt-card-stat"><span>Pago</span><strong>${money(paid)}</strong></div>
+        <div class="debt-card-stat"><span>Saldo do orçamento</span><strong>${money(number(contract.budget) - committed - paid)}</strong></div>
+      </div>
+      ${(contract.stages || []).length ? `<details><summary>Materiais e serviços</summary>
+        ${contract.stages.map(stage => `<div class="debt-progress-copy"><span>${escapeHtml(stage.name)} · ${stage.category === "service" ? "Serviço" : "Material"} · ${renovationStageStatuses[stage.status] || ""} · ${money(stage.amount)}</span>
+          <button class="small-action ghost" type="button" data-action="open-modal" data-modal="renovationStage" data-id="${escapeAttr(`${contract.id}|${stage.id}`)}">Editar etapa</button></div>`).join("")}</details>` : ""}
+      <div class="row-actions">
+        <button class="small-action" type="button" data-action="open-modal" data-modal="renovationStage" data-id="${escapeAttr(contract.id)}">Adicionar etapa</button>
+        <button class="small-action ghost" type="button" data-action="open-modal" data-modal="renovationContract" data-id="${escapeAttr(contract.id)}">Editar</button>
+        <button class="small-action ghost" type="button" data-action="delete-real-estate-contract" data-id="${escapeAttr(contract.id)}">Excluir</button>
+      </div></section>`;
+  }
+
+  function renderRealEstateLinksModal(debt) {
+    if (!debt || !["financing", "consortium"].includes(debt.type)) return "";
+    return `<div class="modal-head"><h2>Vínculos do contrato</h2><button class="close-button" type="button" data-action="close-modal" aria-label="Fechar">x</button></div>
+      <div class="form-grid"><p class="row-meta">${escapeHtml(debt.title)}</p>
+        ${Object.entries(realEstateContractTypes).map(([kind, type]) => {
+          const linked = findItem("saleContracts", debt[type.field]);
+          return `<div class="debt-progress"><strong>${type.label}</strong>${linked ? `<p>${escapeHtml(linked.title)}${linked.payer ? ` · ${escapeHtml(linked.payer)}` : ""}</p>` : ""}
+            <div class="row-actions"><button class="small-action" type="button" data-action="open-modal" data-modal="realEstateLink" data-id="${escapeAttr(`${debt.id}|${kind}`)}">${linked ? "Alterar vínculo" : "Selecionar contrato"}</button>
+              ${debt[type.field] ? renderRemoveFinancingLinkButton(debt.id, type.field, "Remover vínculo") : ""}</div></div>`;
+        }).join("")}</div>`;
   }
 
   function renderRemoveFinancingLinkButton(id, link, label) {
@@ -7161,7 +7246,7 @@
     `;
   }
 
-  function renderDebtList(typeFilter = "") {
+  function renderDebtList(typeFilter = "", manage = true) {
     const debts = state.debts
       .filter((item) => inCountryScope(item.country))
       .filter((item) => !typeFilter || item.type === typeFilter);
@@ -7234,13 +7319,12 @@
                 <p>${progress.paid} pagas - ${progress.remaining} restantes</p>
                 ${item.type === "financing" ? renderFinancingPaymentBreakdown(item, progress.paid, progressPercent) : ""}
               </div>
-              ${item.type === "financing" ? renderFinancingLinks(item, state.ui.selectedMonth) : ""}
-              ${item.type === "financing" ? renderSaleContractLink(item) : ""}
-              <div class="row-actions">
+              ${manage && item.type === "financing" && (item.renovation || item.propertyReceipt) ? renderFinancingLinks(item, state.ui.selectedMonth) : ""}
+              <div class="row-actions">${renderRealEstateLinksButton(item)}${manage ? `
                 <button class="small-action ${paid ? "ghost" : ""}" type="button" data-action="${paid ? "none" : "open-modal"}" data-modal="monthlyPayment" data-payment-id="debt:${item.id}">${paid ? "Pago" : "Pagar"}</button>
                 <button class="small-action ghost" type="button" data-action="open-modal" data-modal="debt" data-id="${item.id}">Editar</button>
                 <button class="small-action ghost" type="button" data-action="delete-debt" data-id="${item.id}">Excluir</button>
-              </div>
+              ` : ""}</div>
             </div>
           `;
         }).join("")}
@@ -7329,7 +7413,7 @@
 
   function propertyReceiptIsScheduled(receipt, month) {
     return Boolean(receipt && month >= receipt.startMonth &&
-      (receipt.kind !== "sale" || !receipt.termMonths || monthDiff(receipt.startMonth, month) < receipt.termMonths));
+      (!receipt.termMonths || monthDiff(receipt.startMonth, month) < receipt.termMonths));
   }
 
   function propertySaleProgress(item, month) {
@@ -7354,13 +7438,26 @@
     return { endMonth, paid: confirmed.size, percent: confirmed.size / receipt.termMonths * 100 };
   }
 
-  function renderRenovationLink(selected = "") {
+  function renderRenovationLink(selected = "", selectedContract = "") {
     const renovations = (state.debts || []).filter(item => item.type === "financing" && item.renovation);
-    if (!renovations.length && !selected) return "";
+    const contracts = (state.saleContracts || []).filter(item => item.kind === "renovation");
+    if (!renovations.length && !contracts.length && !selected && !selectedContract) return "";
+    const migrated = selected && contracts.find(item => item.legacyDebtId === selected);
+    const contractId = selectedContract || migrated?.id;
+    const current = contractId ? `contract:${contractId}` : selected;
     return `<div class="field renovation-link-field"><label for="renovationDebtId">Reforma do imóvel</label>
       <select id="renovationDebtId" name="renovationDebtId"><option value="">Sem vínculo</option>
-        ${renovations.map(item => `<option value="${escapeAttr(item.id)}" ${selectedAttr(item.id, selected)}>${escapeHtml(item.title)} · ${escapeHtml(item.renovation.name)}</option>`).join("")}
+        ${contracts.map(item => `<option value="contract:${escapeAttr(item.id)}" ${selectedAttr(`contract:${item.id}`, current)}>${escapeHtml(item.property)} · ${escapeHtml(item.title)}</option>`).join("")}
+        ${renovations.map(item => `<option value="${escapeAttr(item.id)}" ${selectedAttr(item.id, current)}>${escapeHtml(item.title)} · ${escapeHtml(item.renovation.name)}</option>`).join("")}
       </select></div>`;
+  }
+
+  function renovationExpenseLinks(value = "") {
+    if (value.startsWith("contract:")) {
+      const item = findItem("saleContracts", value.slice(9));
+      return { renovationContractId: item?.kind === "renovation" ? item.id : "", renovationDebtId: "" };
+    }
+    return { renovationContractId: "", renovationDebtId: findItem("debts", value)?.renovation ? value : "" };
   }
 
   function renderFinancingPaymentBreakdown(item, paidInstallments, progressPercent) {
@@ -7387,7 +7484,7 @@
     </div>`;
   }
 
-  function renderConsortiumList() {
+  function renderConsortiumList(manage = true) {
     const consortiums = state.debts
       .filter((item) => item.type === "consortium")
       .filter((item) => inCountryScope(item.country));
@@ -7465,12 +7562,11 @@
                 </div>
               </details>
 
-              ${renderSaleContractLink(item)}
-              <div class="row-actions">
+              <div class="row-actions">${renderRealEstateLinksButton(item)}${manage ? `
                 <button class="small-action ${paidThisMonth ? "ghost" : ""}" type="button" data-action="${paidThisMonth ? "none" : "open-modal"}" data-modal="monthlyPayment" data-payment-id="debt:${item.id}">${paidThisMonth ? "✓ Pago" : "Pagar"}</button>
                 <button class="small-action ghost" type="button" data-action="open-modal" data-modal="debt" data-id="${item.id}">Editar</button>
                 <button class="small-action ghost" type="button" data-action="delete-debt" data-id="${item.id}">Excluir</button>
-              </div>
+              ` : ""}</div>
             </article>
           `;
         }).join("")}
@@ -10105,8 +10201,13 @@
       forexGoal: renderForexGoalModal,
       forexTrade: renderForexTradeModal,
       forexHistory: renderForexHistoryModal,
-      saleContract: renderSaleContractModal,
+      saleContract: item => renderSaleContractModal(item, "", id === "new:rent" ? "rent" : "sale"),
       saleContractLink: renderSaleContractLinkModal,
+      realEstateLinks: renderRealEstateLinksModal,
+      realEstateLink: renderTypedRealEstateLinkModal,
+      renovationContract: renderRenovationContractModal,
+      renovationStage: renderRenovationStageModal,
+      renovationImport: renderRenovationImportModal,
       saleCollect: renderSaleCollectionModal,
       saleImport: renderSaleImportModal,
       nubankBox: renderNubankBoxModal,
@@ -10150,7 +10251,7 @@
       ? { category: String(id).slice(4) }
       : type === "businessRecord"
       ? businessRecordTarget(id)
-      : type === "monthlyPayment" || type === "goalContribution" || type === "salaryReceipt" || type === "nubankBoxContribution" || type === "saleCollect"
+      : type === "monthlyPayment" || type === "goalContribution" || type === "salaryReceipt" || type === "nubankBoxContribution" || ["saleCollect", "realEstateLink", "renovationStage"].includes(type)
         ? id
         : editableItem(type, id);
     const foreignCurrency = modalData && typeof modalData === "object" && (modalData.currency || modalData.costCurrency);
@@ -10496,7 +10597,7 @@
             ${familyMemberOptions(item?.familyMemberId)}
           </select>
         </div>` : `<input type="hidden" name="familyMemberId" value="${escapeAttr(item?.familyMemberId || "")}" />`}
-        ${renderRenovationLink(item?.renovationDebtId)}
+        ${renderRenovationLink(item?.renovationDebtId, item?.renovationContractId)}
         <div class="field">
           <label for="note">Observacao</label>
           <textarea id="note" name="note">${escapeHtml(item?.note || "")}</textarea>
@@ -11630,7 +11731,7 @@
             <input id="purchaseNote" name="note" placeholder="Opcional" value="${escapeAttr(item?.note || "")}" />
           </div>
         </div>
-        ${renderRenovationLink(item?.renovationDebtId)}
+        ${renderRenovationLink(item?.renovationDebtId, item?.renovationContractId)}
         <div class="form-actions">
           <button class="secondary-button" type="button" data-action="close-modal">Cancelar</button>
           <button class="primary-button" type="submit">Salvar compra</button>
@@ -12947,13 +13048,59 @@
     return { housing, deductions: { ...original, ...amounts, configured: original.configured || hasAmounts, entries, total, net: Math.max(0, number(target.grossAmount) - total) } };
   }
 
-  function renderSaleContractModal(sale = null, legacyDebtId = "") {
-    return `<div class="modal-head"><h2>${legacyDebtId ? "Importar contrato de venda" : "Contrato de venda"}</h2><button class="close-button" type="button" data-action="close-modal" aria-label="Fechar">x</button></div>
+  function renderRenovationContractModal(item = null, legacyDebtId = "") {
+    if (item?.id && item.kind !== "renovation") return "";
+    return `<div class="modal-head"><h2>Contrato de reforma</h2><button class="close-button" type="button" data-action="close-modal" aria-label="Fechar">x</button></div>
+      <form class="form-grid" data-form="renovation-contract">${editHidden(item)}<input type="hidden" name="legacyDebtId" value="${escapeAttr(legacyDebtId)}" />
+        <div class="two-cols">
+          <div class="field"><label for="renovationProperty">Imóvel</label><input id="renovationProperty" name="property" required value="${escapeAttr(item?.property || "")}" /></div>
+          <div class="field"><label for="renovationContractTitle">Nome da obra</label><input id="renovationContractTitle" name="title" required value="${escapeAttr(item?.title || "")}" /></div>
+        </div>
+        <div class="three-cols">
+          <div class="field"><label for="renovationContractBudget">Orçamento</label><input id="renovationContractBudget" name="budget" type="number" min="0" step=".01" required value="${escapeAttr(item?.budget ?? "")}" /></div>
+          <div class="field"><label for="renovationContractCurrency">Moeda</label>${item?.id || legacyDebtId ? `<input id="renovationContractCurrency" name="currency" value="${escapeAttr(item.currency)}" readonly />` : `<select id="renovationContractCurrency" name="currency">${currencyOptions(primaryCurrency())}</select>`}</div>
+          <div class="field"><label for="renovationEndDate">Conclusão prevista</label><input id="renovationEndDate" name="endDate" type="date" value="${escapeAttr(item?.endDate || "")}" /></div>
+        </div>
+        ${legacyDebtId || item?.legacyDebtId ? `<div class="field"><label for="renovationLegacyPending">Valor a pagar importado</label><input id="renovationLegacyPending" name="legacyCommitments" type="number" min="0" step=".01" value="${escapeAttr(item?.legacyCommitments || 0)}" /></div>` : ""}
+        <div class="form-actions"><button class="secondary-button" type="button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">Salvar reforma</button></div>
+      </form>`;
+  }
+
+  function renderRenovationImportModal(debt) {
+    if (!debt?.renovation || debt.renovationContractId) return "";
+    return renderRenovationContractModal({ property: debt.title, title: debt.renovation.name, currency: debt.currency,
+      budget: debt.renovation.budget, legacyCommitments: debt.renovation.unlinkedCommitments }, debt.id);
+  }
+
+  function renderRenovationStageModal(ref) {
+    const [id, stageId] = String(ref).split("|");
+    const contract = findItem("saleContracts", id);
+    if (contract?.kind !== "renovation") return "";
+    const stage = (contract.stages || []).find(item => item.id === stageId);
+    return `<div class="modal-head"><h2>${stage ? "Editar etapa" : "Adicionar etapa"}</h2><button class="close-button" type="button" data-action="close-modal" aria-label="Fechar">x</button></div>
+      <form class="form-grid" data-form="renovation-stage">
+        ${editHidden(contract)}<input type="hidden" name="stageId" value="${escapeAttr(stage?.id || "")}" />
+        <div class="field"><label for="renovationStageName">Material ou serviço</label><input id="renovationStageName" name="title" required value="${escapeAttr(stage?.name || "")}" /></div>
+        <div class="three-cols">
+          <div class="field"><label for="renovationStageCategory">Tipo</label><select id="renovationStageCategory" name="category"><option value="material">Material</option><option value="service" ${selectedAttr("service", stage?.category)}>Serviço</option></select></div>
+          <div class="field"><label for="renovationStageAmount">Valor em ${escapeHtml(contract.currency)}</label><input id="renovationStageAmount" name="amount" type="number" required min="0" step=".01" value="${escapeAttr(stage?.amount ?? "")}" /></div>
+          <div class="field"><label for="renovationStageStatus">Situação</label><select id="renovationStageStatus" name="status">${Object.entries(renovationStageStatuses).map(([key, label]) => `<option value="${key}" ${selectedAttr(key, stage?.status)}>${label}</option>`).join("")}</select></div>
+        </div>
+        <p class="row-meta">Se um gasto já está vinculado à obra, evite registrá-lo como outra etapa paga.</p>
+        <div class="form-actions"><button class="secondary-button" type="button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">Salvar etapa</button></div>
+      </form>`;
+  }
+
+  function renderSaleContractModal(sale = null, legacyDebtId = "", newKind = "sale") {
+    const kind = sale?.kind || newKind;
+    const rental = kind === "rent";
+    return `<div class="modal-head"><h2>${legacyDebtId ? "Importar · " : ""}${realEstateContractTypes[kind].label}</h2><button class="close-button" type="button" data-action="close-modal" aria-label="Fechar">x</button></div>
       <form class="form-grid" data-form="sale-contract">
         ${editHidden(sale)}<input type="hidden" name="legacyDebtId" value="${escapeAttr(legacyDebtId)}" />
+        <input type="hidden" name="kind" value="${kind}" />
         <div class="two-cols">
-          <div class="field"><label for="saleTitle">Nome do contrato</label><input id="saleTitle" name="title" required value="${escapeAttr(sale?.title || "")}" /></div>
-          <div class="field"><label for="salePayer">Nome do comprador</label><input id="salePayer" name="payer" required value="${escapeAttr(sale?.payer || "")}" /></div>
+          <div class="field"><label for="saleTitle">Imóvel ou nome do contrato</label><input id="saleTitle" name="title" required value="${escapeAttr(sale?.title || "")}" /></div>
+          <div class="field"><label for="salePayer">${rental ? "Nome do locatário" : "Nome do comprador"}</label><input id="salePayer" name="payer" required value="${escapeAttr(sale?.payer || "")}" /></div>
         </div>
         <div class="three-cols">
           <div class="field"><label for="saleAmount">Valor mensal</label><input id="saleAmount" name="amount" type="number" min=".01" step=".01" required value="${escapeAttr(sale?.amount ?? "")}" /></div>
@@ -12962,8 +13109,13 @@
         </div>
         <div class="two-cols">
           <div class="field"><label for="saleStartMonth">Primeiro mês</label><input id="saleStartMonth" name="startMonth" type="month" required value="${escapeAttr(sale?.startMonth || currentMonth())}" /></div>
-          <div class="field"><label for="saleTerm">Prazo em meses</label><input id="saleTerm" name="termMonths" type="number" min="1" max="1200" required value="${escapeAttr(sale?.termMonths ?? "")}" /></div>
+          <div class="field"><label for="saleTerm">Prazo em meses${rental ? " (opcional)" : ""}</label><input id="saleTerm" name="termMonths" type="number" min="1" max="1200" ${rental ? "" : "required"} value="${escapeAttr(sale?.termMonths ?? "")}" /></div>
         </div>
+        <div class="two-cols">
+          ${rental ? "" : `<div class="field"><label for="saleTotalValue">Valor total da venda</label><input id="saleTotalValue" name="totalValue" type="number" min="0" step=".01" value="${escapeAttr(sale?.totalValue ?? "")}" /></div>`}
+          <div class="field"><label for="saleReceiptMethod">Forma de recebimento</label><select id="saleReceiptMethod" name="receiptMethod">
+            ${["", "Pix", "TED", "Dinheiro", "Débito em conta", "Outro"].map(method => `<option value="${method}" ${selectedAttr(method, sale?.receiptMethod)}>${method || "Selecione"}</option>`).join("")}
+          </select></div></div>
         <div class="field"><label for="saleAccount">Conta de recebimento</label><select id="saleAccount" name="bankAccountId" required>${bankAccountSelectOptions("global", sale?.bankAccountId, "Selecione a conta")}</select></div>
         ${legacyDebtId ? "<p class='row-meta'>Os pagamentos históricos serão reaproveitados, e o financiamento ficará vinculado ao novo contrato.</p>" : ""}
         <div class="form-actions"><button class="secondary-button" type="button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">Salvar contrato</button></div>
@@ -12972,21 +13124,30 @@
 
   function renderSaleImportModal(debt) {
     const receipt = debt?.propertyReceipt;
-    return receipt?.kind === "sale" && !debt.saleContractId ? renderSaleContractModal({ ...receipt, title: debt.title, currency: debt.currency }, debt.id) : "";
+    if (!receipt || !["sale", "rent"].includes(receipt.kind) || debt[realEstateContractTypes[receipt.kind].field]) return "";
+    return renderSaleContractModal({ ...receipt, title: debt.title, currency: debt.currency }, debt.id);
   }
 
-  function renderSaleContractLinkModal(debt) {
+  function renderTypedRealEstateLinkModal(ref) {
+    const [id, kind] = String(ref).split("|");
+    return renderSaleContractLinkModal(findItem("debts", id), kind);
+  }
+
+  function renderSaleContractLinkModal(debt, kind = "sale") {
     if (!debt || !["financing", "consortium"].includes(debt.type)) return "";
-    const sales = (state.saleContracts || []).filter(sale => sale.currency === debt.currency);
-    return `<div class="modal-head"><h2>Vincular contrato de venda</h2><button class="close-button" type="button" data-action="close-modal" aria-label="Fechar">x</button></div>
+    if (!Object.hasOwn(realEstateContractTypes, kind)) return "";
+    const type = realEstateContractTypes[kind];
+    const sales = (state.saleContracts || []).filter(sale => (sale.kind || "sale") === kind && sale.currency === debt.currency);
+    const compatibleLegacy = (kind === "renovation" ? debt.renovation : debt.propertyReceipt?.kind === kind) && !debt[type.field];
+    return `<div class="modal-head"><h2>${type.label}</h2><button class="close-button" type="button" data-action="close-modal" aria-label="Fechar">x</button></div>
       <form class="form-grid" data-form="sale-contract-link">
-        ${editHidden(debt)}
+        ${editHidden(debt)}<input type="hidden" name="kind" value="${kind}" />
         <p class="row-meta">${escapeHtml(debt.title)} · ${escapeHtml(debt.currency)}</p>
-        ${debt.propertyReceipt?.kind === "sale" && !debt.saleContractId ? `<button class="secondary-button" type="button" data-action="open-modal" data-modal="saleImport" data-id="${escapeAttr(debt.id)}">Importar vínculo e histórico existentes</button>` : ""}
-        ${!sales.length ? `<p class="row-meta">Cadastre um comprador em Contratos de venda, na mesma moeda.</p><button class="secondary-button" type="button" data-action="open-modal" data-modal="saleContract">Cadastrar contrato de venda</button>` : ""}
-        <div class="field"><label for="saleLinkId">Contrato e comprador</label><select id="saleLinkId" name="saleContractId">
-          <option value="">Sem vínculo</option>${sales.map(sale => `<option value="${escapeAttr(sale.id)}" ${selectedAttr(sale.id, debt.saleContractId)}>${escapeHtml(sale.payer)} · ${escapeHtml(sale.title)}</option>`).join("")}</select></div>
-        <p class="row-meta">O destino usa o valor da prestação do mês.</p>
+        ${compatibleLegacy ? `<button class="secondary-button" type="button" data-action="open-modal" data-modal="${kind === "renovation" ? "renovationImport" : "saleImport"}" data-id="${escapeAttr(debt.id)}">Importar vínculo e histórico existentes</button>` : ""}
+        ${!sales.length ? `<p class="row-meta">Cadastre primeiro um contrato do mesmo tipo e moeda em Contratos Imobiliários.</p><button class="secondary-button" type="button" data-action="open-modal" data-modal="${kind === "renovation" ? "renovationContract" : "saleContract"}" ${kind === "rent" ? 'data-id="new:rent"' : ""}>Cadastrar contrato</button>` : ""}
+        <div class="field"><label for="saleLinkId">Contrato cadastrado</label><select id="saleLinkId" name="saleContractId">
+          <option value="">Sem vínculo</option>${sales.map(sale => `<option value="${escapeAttr(sale.id)}" ${selectedAttr(sale.id, debt[type.field])}>${escapeHtml(sale.title)}${sale.payer ? ` · ${escapeHtml(sale.payer)}` : ""}</option>`).join("")}</select></div>
+        ${kind === "renovation" ? "" : '<p class="row-meta">O destino usa o valor da prestação do mês.</p>'}
         <div class="form-actions"><button class="secondary-button" type="button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">Salvar vínculo</button></div>
       </form>`;
   }
@@ -12994,12 +13155,13 @@
   function renderSaleCollectionModal(ref) {
     const [id, month] = String(ref || "").split("|");
     const sale = findItem("saleContracts", id);
-    if (!sale || !propertyReceiptIsScheduled(sale, month) || month > currentMonth()) return "";
+    if (!isPropertyIncomeContract(sale) || !propertyReceiptIsScheduled(sale, month) || month > currentMonth()) return "";
     const receipt = saleReceiptForMonth(sale, month);
     const rows = saleAllocationRows(sale, month);
     const account = bankAccountById(receipt ? receipt.bankAccountId : sale.bankAccountId);
     const canApply = account?.active !== false && account?.currency === sale.currency && rows.some(row => !row.paid);
-    return `<div class="modal-head"><h2>${receipt ? "Registrar pagamentos da venda" : "Confirmar recebimento da venda"}</h2><button class="close-button" type="button" data-action="close-modal" aria-label="Fechar">x</button></div>
+    const label = sale.kind === "rent" ? "do aluguel" : "da venda";
+    return `<div class="modal-head"><h2>${receipt ? `Registrar pagamentos ${label}` : `Confirmar recebimento ${label}`}</h2><button class="close-button" type="button" data-action="close-modal" aria-label="Fechar">x</button></div>
       <form class="form-grid" data-form="sale-collection">
         ${editHidden(sale)}<input type="hidden" name="month" value="${escapeAttr(month)}" />
         <p class="row-meta">${escapeHtml(sale.payer)} · ${escapeHtml(formatMonthLabel(month))}${account ? ` · ${escapeHtml(bankAccountName(account))}` : ""}</p>
@@ -13034,7 +13196,7 @@
           <div class="field"><label for="renovationCommitments">Contratado a pagar fora do cartão</label><input id="renovationCommitments" name="renovationCommitments" type="number" min="0" step="${step}" value="${escapeAttr(renovation?.unlinkedCommitments ?? "")}" /><small>Atualize esse valor ao vincular um pagamento para que ele seja contado uma única vez.</small></div>
         </div>
         <h3>Recebimento mensal</h3>
-        <button class="secondary-button" type="button" data-action="open-modal" data-modal="saleContractLink" data-id="${escapeAttr(item.id)}">Selecionar comprador em Contratos de venda</button>
+        <button class="secondary-button" type="button" data-action="open-modal" data-modal="realEstateLinks" data-id="${escapeAttr(item.id)}">Selecionar em Contratos Imobiliários</button>
         <div class="two-cols">
           <div class="field"><label for="propertyReceiptKind">Tipo</label><select id="propertyReceiptKind" name="receiptKind">
             <option value="">Sem aluguel previsto</option>${receipt?.kind === "sale" ? '<option value="sale" selected>Parcela da venda (vínculo anterior)</option>' : ""}
@@ -13282,7 +13444,7 @@
       bankAccountId: data.bankAccountId || "",
       receiptMethod: data.receiptMethod || "",
       familyMemberId: data.familyMemberId || "",
-      renovationDebtId: data.type === "expense" && findItem("debts", data.renovationDebtId)?.renovation ? data.renovationDebtId : "",
+      ...renovationExpenseLinks(data.type === "expense" ? data.renovationDebtId : ""),
       note: data.note.trim()
     });
     const updated = upsertItem("transactions", data.id, entry, true);
@@ -13783,12 +13945,73 @@
     showToast(updated ? "Conta fixa atualizada." : "Conta fixa salva.");
   }
 
+  function saveRenovationContract(form) {
+    const data = formData(form);
+    const existing = findItem("saleContracts", data.id);
+    const legacy = data.legacyDebtId ? findItem("debts", data.legacyDebtId) : null;
+    if ((data.id && existing?.kind !== "renovation") || (data.legacyDebtId && (!legacy?.renovation || legacy.renovationContractId ||
+        (state.saleContracts || []).some(item => item.kind === "renovation" && item.legacyDebtId === legacy.id)))) return;
+    const title = String(data.title || "").trim();
+    const property = String(data.property || "").trim();
+    const budget = Number(data.budget);
+    if (!title || !property || !Number.isFinite(budget) || budget < 0 || (data.endDate && !isValidIsoDate(data.endDate))) {
+      showToast("Confira o imóvel, o nome, o orçamento e o prazo da reforma.");
+      return;
+    }
+    const id = existing?.id || (legacy ? `sc_renovation_${legacy.id}` : uid("sc"));
+    upsertItem("saleContracts", id, { kind: "renovation", title, property, budget,
+      currency: existing?.currency || legacy?.currency || sanitizeCurrency(data.currency), endDate: data.endDate || "",
+      legacyCommitments: Math.max(0, number(data.legacyCommitments)), ...(legacy ? { legacyDebtId: legacy.id } : {}) });
+    if (legacy) upsertItem("debts", legacy.id, { renovationContractId: id, renovation: null });
+    saveState({ remoteNow: true });
+    closeModal();
+    render();
+    showToast("Reforma salva.");
+  }
+
+  function saveRenovationStage(form) {
+    const data = formData(form);
+    const contract = findItem("saleContracts", data.id);
+    const name = String(data.title || "").trim();
+    const amount = Number(data.amount);
+    if (contract?.kind !== "renovation" || !name || !Number.isFinite(amount) || amount < 0 ||
+        !Object.hasOwn(renovationStageStatuses, data.status)) return;
+    const stages = contract.stages || [];
+    if (data.stageId && !stages.some(stage => stage.id === data.stageId)) return;
+    const stage = { id: data.stageId || uid("rs"), name, amount, status: data.status, category: data.category === "service" ? "service" : "material" };
+    upsertItem("saleContracts", contract.id, { stages: data.stageId ? stages.map(item => item.id === stage.id ? stage : item) : [...stages, stage] });
+    saveState({ remoteNow: true });
+    closeModal();
+    render();
+    showToast("Etapa salva.");
+  }
+
+  function deleteRealEstateContract(id) {
+    if (!hasHouseholdPermission("write") || !findItem("saleContracts", id)) return;
+    if (!window.confirm("Excluir este contrato imobiliário e remover seus vínculos? Os lançamentos e pagamentos já registrados serão preservados.")) return;
+    for (const debt of state.debts || []) {
+      const changes = {};
+      for (const { field } of Object.values(realEstateContractTypes)) {
+        if (debt[field] === id) changes[field] = null;
+      }
+      if (Object.keys(changes).length) upsertItem("debts", debt.id, changes);
+    }
+    rememberDeletedItems("saleContracts", [{ id }]);
+    state.saleContracts = state.saleContracts.filter(item => item.id !== id);
+    saveState({ remoteNow: true });
+    closeModal();
+    render();
+    showToast("Contrato imobiliário excluído.");
+  }
+
   function saveSaleContract(form) {
     const data = formData(form);
     const existing = findItem("saleContracts", data.id);
     const legacy = data.legacyDebtId ? findItem("debts", data.legacyDebtId) : null;
-    if ((data.id && !existing) || (data.legacyDebtId && (legacy?.propertyReceipt?.kind !== "sale" || legacy.saleContractId ||
-        (state.saleContracts || []).some(sale => sale.legacyDebtId === legacy.id)))) {
+    const kind = existing ? existing.kind || "sale" : data.kind;
+    if (!["sale", "rent"].includes(kind) || (data.id && !existing) ||
+        (data.legacyDebtId && (legacy?.propertyReceipt?.kind !== kind || legacy[realEstateContractTypes[kind].field] ||
+        (state.saleContracts || []).some(sale => sale.legacyDebtId === legacy.id && (sale.kind || "sale") === kind)))) {
       showToast("Este contrato já foi importado ou não está disponível.");
       return;
     }
@@ -13797,50 +14020,57 @@
     const amount = number(data.amount);
     const currency = existing?.currency || legacy?.currency || sanitizeCurrency(data.currency);
     const dueDay = number(data.dueDay);
-    const termMonths = number(data.termMonths);
+    const termMonths = kind === "rent" && !data.termMonths ? null : number(data.termMonths);
+    const totalValue = kind === "sale" ? Math.max(0, number(data.totalValue)) : 0;
     const account = bankAccountById(data.bankAccountId);
     if (!title || !payer || amount <= 0 || !Number.isInteger(dueDay) || dueDay < 1 || dueDay > 31 ||
-        !Number.isInteger(termMonths) || termMonths < 1 || termMonths > 1200 ||
+        (termMonths !== null && (!Number.isInteger(termMonths) || termMonths < 1 || termMonths > 1200)) ||
         !/^\d{4}-(0[1-9]|1[0-2])$/.test(data.startMonth || "") || !account || account.active === false || account.currency !== currency ||
         (currency === "JPY" && !Number.isInteger(amount))) {
       showToast("Confira os dados e selecione uma conta na moeda do contrato.");
       return;
     }
-    const id = existing?.id || (legacy ? `sc_import_${legacy.id}` : uid("sc"));
-    upsertItem("saleContracts", id, { kind: "sale", title, payer, amount, currency, dueDay, termMonths, startMonth: data.startMonth,
+    const id = existing?.id || (legacy ? `sc_import_${kind}_${legacy.id}` : uid("sc"));
+    upsertItem("saleContracts", id, { kind, title, payer, amount, currency, dueDay, termMonths, totalValue,
+      receiptMethod: String(data.receiptMethod || "").trim(), startMonth: data.startMonth,
       bankAccountId: account.id, ...(legacy ? { legacyDebtId: legacy.id, legacyDestination: legacy.propertyReceipt.destination } : {}) });
-    if (legacy) upsertItem("debts", legacy.id, { saleContractId: id, propertyReceipt: null });
+    if (legacy) upsertItem("debts", legacy.id, { [realEstateContractTypes[kind].field]: id, propertyReceipt: null });
     saveState({ remoteNow: true });
     closeModal();
     render();
-    showToast("Contrato de venda salvo.");
+    showToast("Contrato imobiliário salvo.");
   }
 
   function saveSaleContractLink(form) {
-    const { id, saleContractId } = formData(form);
+    const { id, saleContractId, kind } = formData(form);
     const debt = findItem("debts", id);
-    if (!debt || !["financing", "consortium"].includes(debt.type)) return;
-    if (!saleContractId && debt.saleContractId) {
-      removeFinancingLink(id, "saleContractId");
+    if (!debt || !Object.hasOwn(realEstateContractTypes, kind) || !["financing", "consortium"].includes(debt.type)) return;
+    const { field } = realEstateContractTypes[kind];
+    if (!saleContractId && debt[field]) {
+      removeFinancingLink(id, field);
       return;
     }
     const sale = findItem("saleContracts", saleContractId);
-    if (saleContractId && (!sale?.payer || sale.currency !== debt.currency)) {
-      showToast("Selecione um contrato com comprador cadastrado e na mesma moeda.");
+    if (saleContractId && (!sale || (sale.kind || "sale") !== kind || (kind !== "renovation" && !sale.payer) || sale.currency !== debt.currency)) {
+      showToast("Selecione um contrato cadastrado do mesmo tipo e moeda.");
       return;
     }
-    upsertItem("debts", id, { saleContractId: sale?.id || "" });
+    if (sale && !debt[field] && (kind === "renovation" ? debt.renovation : debt.propertyReceipt?.kind === kind)) {
+      showToast("Importe o vínculo anterior ou remova-o em Patrimônio antes de vincular outro contrato deste tipo.");
+      return;
+    }
+    upsertItem("debts", id, { [field]: sale?.id || "" });
     saveState({ remoteNow: true });
     closeModal();
     render();
-    showToast(sale ? "Contrato de venda vinculado." : "Vínculo removido.");
+    showToast(sale ? "Contrato imobiliário vinculado." : "Vínculo removido.");
   }
 
   function saveSaleCollection(form, mode) {
     const data = formData(form);
     const sale = findItem("saleContracts", data.id);
     const { month, date } = data;
-    if (!sale || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month || "") || !propertyReceiptIsScheduled(sale, month) || month > currentMonth() ||
+    if (!isPropertyIncomeContract(sale) || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month || "") || !propertyReceiptIsScheduled(sale, month) || month > currentMonth() ||
         !isValidIsoDate(date) || date > localDateKey() || !["receipt", "apply"].includes(mode)) return;
     const receipt = saleReceiptForMonth(sale, month);
     const amount = number(receipt?.amount ?? data.amount);
@@ -13864,8 +14094,9 @@
     const base = { date, country: account.country, currency: sale.currency, bankAccountId: account.id, saleContractId: sale.id, saleMonth: month };
     if (!receipt) {
       const incomeId = `tx_sale_${sale.id}_${month}`;
+      const category = sale.kind === "rent" ? "Aluguel recebido" : "Parcela da venda";
       upsertItem("transactions", state.deletedItems?.transactions?.[incomeId] ? "" : incomeId, {
-        ...base, type: "income", title: `Parcela da venda · ${sale.title}`, category: "Parcela da venda", amount
+        ...base, type: "income", title: `${category} · ${sale.title}`, category, amount
       }, true);
     }
     for (const { debt, amount: installment } of rows) {
@@ -13920,10 +14151,11 @@
   }
 
   function removeFinancingLink(id, link) {
-    if (!hasHouseholdPermission("write") || !["renovation", "propertyReceipt", "saleContractId"].includes(link)) return;
+    const type = Object.values(realEstateContractTypes).find(item => item.field === link);
+    if (!hasHouseholdPermission("write") || (!type && !["renovation", "propertyReceipt"].includes(link))) return;
     const item = findItem("debts", id);
-    if (!item?.[link] || (item.type !== "financing" && !(item.type === "consortium" && link === "saleContractId"))) return;
-    const label = { renovation: "da reforma", propertyReceipt: "do recebimento", saleContractId: "da venda" }[link];
+    if (!item?.[link] || (item.type !== "financing" && !(item.type === "consortium" && type))) return;
+    const label = type ? `de ${type.label.toLowerCase()}` : link === "renovation" ? "da reforma" : "do recebimento";
     if (!window.confirm(`Remover o vínculo ${label}? Os pagamentos e lançamentos já registrados serão preservados.`)) return;
     const changes = { [link]: null };
     if (link === "saleContractId" && item.propertyReceipt?.kind === "sale" &&
@@ -14224,7 +14456,7 @@
       purchaseDate: data.purchaseDate,
       familyMemberId: data.familyMemberId || "",
       interestAmount: Math.max(0, number(data.interestAmount)),
-      renovationDebtId: findItem("debts", data.renovationDebtId)?.renovation ? data.renovationDebtId : "",
+      ...renovationExpenseLinks(data.renovationDebtId),
       note: data.note.trim()
     }, true);
     state.ui.selectedMonth = firstBillMonth;
@@ -21174,6 +21406,9 @@
       investment: "investments",
       forexTrade: "forexTrades",
       saleContract: "saleContracts",
+      renovationContract: "saleContracts",
+      renovationImport: "debts",
+      realEstateLinks: "debts",
       saleContractLink: "debts",
       saleImport: "debts",
       nubankBox: "nubankBoxes",
