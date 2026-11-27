@@ -470,7 +470,7 @@
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./service-worker.js?v=326")
+      navigator.serviceWorker.register("./service-worker.js?v=327")
         .then((registration) => registration.update().catch(() => {}))
         .catch(() => {});
     });
@@ -864,6 +864,9 @@
   });
 
   document.addEventListener("change", (event) => {
+    if (event.target.id === "saleReceiptMonth" && event.target.form.elements.date) {
+      event.target.form.elements.date.value = "";
+    }
     if (["saleCurrency", "renovationContractCurrency"].includes(event.target.id) || event.target.name === "linkedDebtIds") {
       updateRealEstateLinkPicker(event.target.form);
     }
@@ -5456,6 +5459,23 @@
     return null;
   }
 
+  function pendingSaleReceiptMonths(sale, current, existingMonth = "") {
+    const count = monthDiff(sale.startMonth, current) + 1;
+    const months = [];
+    for (let index = 0; index < Math.min(count, sale.termMonths || count); index++) {
+      const month = addMonths(sale.startMonth, index);
+      if (month === existingMonth || !saleReceiptForMonth(sale, month)) months.push(month);
+    }
+    return months;
+  }
+
+  function canMoveSaleReceipt(sale, entry, month) {
+    return entry?.type === "income" && entry.saleContractId === sale.id && entry.saleMonth === month &&
+      !(state.transactions || []).some(row => row.saleContractId === sale.id && row.saleMonth === month && row.paymentKey) &&
+      !Object.entries(state.paidCommitments || {}).some(([key, payment]) =>
+        key.startsWith(`${month}:debt:`) && payment?.saleContractId === sale.id);
+  }
+
   function saleAllocationRows(sale, month) {
     const field = realEstateContractTypes[sale.kind || "sale"].field;
     return (state.debts || []).filter(debt => debt[field] === sale.id && debt.currency === sale.currency &&
@@ -5520,9 +5540,12 @@
             ${rows.map(({ debt, amount, paid }) => `<p>${escapeHtml(debt.title)} · ${money(amount)} · ${paid ? "Pago" : "A pagar"}</p>`).join("")}
             ${rows.length ? `<p>Saldo após os destinos · ${money(number(receipt?.amount ?? sale.amount) - totalDestinations)}</p>` : ""}
             ${receipt ? `<p>Usado em parcelas deste recebimento · ${money(actualApplied)}</p>` : ""}` : ""}
-          ${manage && registered.length ? `<details><summary>Histórico de recebimentos</summary>${registered.slice().reverse().map(({ reference, entry }) => `<p>${escapeHtml(formatMonthLabel(reference))} · ${money(entry.amount)}</p>`).join("")}</details>` : ""}
+          ${registered.length ? `<details><summary>Histórico de recebimentos</summary>${registered.slice().reverse().map(({ reference, entry }) => `<div class="row-actions">
+            <p>${escapeHtml(formatMonthLabel(reference))} · ${money(entry.amount)}</p>
+            ${canMoveSaleReceipt(sale, entry, reference) ? `<button class="small-action ghost" type="button" data-action="open-modal" data-modal="saleCollect" data-id="${escapeAttr(`${sale.id}|${reference}|move`)}">Corrigir mês</button>` : ""}
+          </div>`).join("")}</details>` : ""}
           <div class="row-actions">
-            ${scheduled && month <= current && !receipt ? `<button class="small-action" type="button" data-action="open-modal" data-modal="saleCollect" data-id="${escapeAttr(`${sale.id}|${month}`)}">Confirmar recebimento</button>` : ""}
+            ${registered.length < Math.min(elapsed, sale.termMonths || elapsed) ? `<button class="small-action" type="button" data-action="open-modal" data-modal="saleCollect" data-id="${escapeAttr(`${sale.id}|${month}`)}">Registrar recebimento</button>` : ""}
             ${manage ? `
             <button class="small-action ghost" type="button" data-action="open-modal" data-modal="saleContract" data-id="${escapeAttr(sale.id)}">Editar</button>
             <button class="small-action ghost" type="button" data-action="delete-real-estate-contract" data-id="${escapeAttr(sale.id)}">Excluir</button>` : ""}
@@ -13247,24 +13270,31 @@
   }
 
   function renderSaleCollectionModal(ref) {
-    const [id, month] = String(ref || "").split("|");
+    const [id, preferredMonth, mode] = String(ref || "").split("|");
     const sale = findItem("saleContracts", id);
-    if (!isPropertyIncomeContract(sale) || !propertyReceiptIsScheduled(sale, month) || month > currentMonth()) return "";
-    const receipt = saleReceiptForMonth(sale, month);
-    if (receipt) return "";
+    if (!isPropertyIncomeContract(sale)) return "";
+    const existing = mode === "move" ? saleReceiptForMonth(sale, preferredMonth) : null;
+    if (mode === "move" && !canMoveSaleReceipt(sale, existing, preferredMonth)) return "";
+    const current = currentMonth();
+    const months = pendingSaleReceiptMonths(sale, current, existing?.saleMonth);
+    const month = months.includes(preferredMonth) ? preferredMonth : months[0];
+    if (!month) return "";
     const account = bankAccountById(sale.bankAccountId);
     const label = sale.kind === "rent" ? "do aluguel" : "da venda";
-    return `<div class="modal-head"><h2>Confirmar recebimento ${label}</h2><button class="close-button" type="button" data-action="close-modal" aria-label="Fechar">x</button></div>
+    return `<div class="modal-head"><h2>${existing ? "Corrigir mês do recebimento" : `Confirmar recebimento ${label}`}</h2><button class="close-button" type="button" data-action="close-modal" aria-label="Fechar">x</button></div>
       <form class="form-grid" data-form="sale-collection">
-        ${editHidden(sale)}<input type="hidden" name="month" value="${escapeAttr(month)}" />
-        <p class="row-meta">${escapeHtml(sale.payer)} · ${escapeHtml(formatMonthLabel(month))}${account ? ` · ${escapeHtml(bankAccountName(account))}` : ""}</p>
-        <div class="two-cols">
+        ${editHidden(sale)}${existing ? `<input type="hidden" name="moveReceiptId" value="${escapeAttr(existing.id)}" />` : ""}
+        <p class="row-meta">${escapeHtml(sale.payer)}${!existing && account ? ` · ${escapeHtml(bankAccountName(account))}` : ""}</p>
+        <div class="field"><label for="saleReceiptMonth">Mês da parcela</label><select id="saleReceiptMonth" name="month" required>
+          ${months.map(value => `<option value="${escapeAttr(value)}" ${selectedAttr(value, month)}>${escapeHtml(formatMonthLabel(value))}</option>`).join("")}
+        </select></div>
+        ${existing ? `<p class="row-meta">${formatMoney(existing.amount, existing.currency)} · recebido em ${formatShortDate(existing.date)}. Apenas o mês da parcela será alterado.</p>` : `<div class="two-cols">
           <div class="field"><label for="saleReceiptAmount">Valor recebido</label><input id="saleReceiptAmount" name="amount" type="number" min=".01" step="${sale.currency === "JPY" ? "1" : ".01"}" required value="${escapeAttr(sale.amount)}" /></div>
           <div class="field"><label for="saleReceiptDate">Data do recebimento</label><input id="saleReceiptDate" name="date" type="date" required max="${localDateKey()}" value="${month === currentMonth() ? localDateKey() : ""}" /></div>
-        </div>
+        </div>`}
         <div class="form-actions">
           <button class="secondary-button" type="button" data-action="close-modal">Depois</button>
-          <button class="primary-button" type="submit">Confirmar recebimento</button>
+          <button class="primary-button" type="submit">${existing ? "Salvar mês da parcela" : "Confirmar recebimento"}</button>
         </div>
       </form>`;
   }
@@ -14222,7 +14252,25 @@
     const sale = findItem("saleContracts", data.id);
     const { month, date } = data;
     if (!isPropertyIncomeContract(sale) || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month || "") || !propertyReceiptIsScheduled(sale, month) || month > currentMonth() ||
-        !isValidIsoDate(date) || date > localDateKey()) return;
+        (!data.moveReceiptId && (!isValidIsoDate(date) || date > localDateKey()))) return;
+    if (data.moveReceiptId) {
+      const entry = findItem("transactions", data.moveReceiptId);
+      if (!canMoveSaleReceipt(sale, entry, entry?.saleMonth)) {
+        showToast("Este recebimento não pode ser movido porque já foi usado em uma prestação.");
+        return;
+      }
+      const other = saleReceiptForMonth(sale, month);
+      if (other && other.id !== entry.id) {
+        showToast("Já existe um recebimento para esse mês.");
+        return;
+      }
+      upsertItem("transactions", entry.id, { saleMonth: month });
+      saveState({ remoteNow: true });
+      closeModal();
+      render();
+      showToast("Mês da parcela corrigido.");
+      return;
+    }
     if (saleReceiptForMonth(sale, month)) {
       showToast("O recebimento deste mês já está registrado.");
       return;
@@ -14236,7 +14284,7 @@
     }
     const incomeId = `tx_sale_${sale.id}_${month}`;
     const category = sale.kind === "rent" ? "Aluguel recebido" : "Parcela da venda";
-    upsertItem("transactions", state.deletedItems?.transactions?.[incomeId] ? "" : incomeId, {
+    upsertItem("transactions", state.deletedItems?.transactions?.[incomeId] || findItem("transactions", incomeId) ? "" : incomeId, {
       date, country: account?.country || (sale.currency === "BRL" ? "brasil" : "japao"), currency: sale.currency,
       bankAccountId: account?.id || "", saleContractId: sale.id, saleMonth: month,
       type: "income", title: `${category} · ${sale.title}`, category, amount
