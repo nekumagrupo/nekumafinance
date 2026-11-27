@@ -1,6 +1,6 @@
 (function () {
   'use strict';
-  const cardClasses = ['overview-card', 'paypal-panel', 'dashboard-cards-panel', 'housing-panel', 'vehicle-panel', 'subscriptions-panel', 'financial-calendar-panel', 'balance-projection-panel', 'work-calendar-panel', 'family-pie-panel', 'dashboard-trend-panel', 'emergency-reserve-panel', 'crypto-panel', 'goals-panel', 'nubank-boxes-home-panel', 'debt-home-panel', 'consortium-home-panel', 'family-tools-panel', 'family-panel', 'recent-transactions-panel', 'budget-summary-panel'];
+  const cardClasses = ['overview-card', 'paypal-panel', 'dashboard-cards-panel', 'housing-panel', 'vehicle-panel', 'subscriptions-panel', 'financial-calendar-panel', 'balance-projection-panel', 'work-calendar-panel', 'family-pie-panel', 'dashboard-trend-panel', 'emergency-reserve-panel', 'crypto-panel', 'goals-panel', 'nubank-boxes-home-panel', 'real-estate-home-panel', 'debt-home-panel', 'consortium-home-panel', 'family-tools-panel', 'family-panel', 'recent-transactions-panel', 'budget-summary-panel'];
   let sortables = [];
   let dragging = false;
   let pinned = {};
@@ -106,7 +106,7 @@
     });
   }
 
-  const mobileOrder = ['overview-card', 'work-calendar-panel', 'subscriptions-panel', 'dashboard-cards-panel', 'housing-panel', 'vehicle-panel', 'family-panel', 'family-tools-panel', 'family-pie-panel', 'financial-calendar-panel', 'dashboard-trend-panel', 'crypto-panel', 'goals-panel', 'emergency-reserve-panel', 'nubank-boxes-home-panel', 'debt-home-panel', 'consortium-home-panel', 'budget-summary-panel', 'balance-projection-panel', 'recent-transactions-panel'];
+  const mobileOrder = ['overview-card', 'work-calendar-panel', 'subscriptions-panel', 'dashboard-cards-panel', 'housing-panel', 'real-estate-home-panel', 'vehicle-panel', 'family-panel', 'family-tools-panel', 'family-pie-panel', 'financial-calendar-panel', 'dashboard-trend-panel', 'crypto-panel', 'goals-panel', 'emergency-reserve-panel', 'nubank-boxes-home-panel', 'debt-home-panel', 'consortium-home-panel', 'budget-summary-panel', 'balance-projection-panel', 'recent-transactions-panel'];
   const paidCards = ['goals-panel', 'emergency-reserve-panel', 'nubank-boxes-home-panel', 'debt-home-panel', 'consortium-home-panel', 'budget-summary-panel', 'balance-projection-panel'];
   const familyCards = ['family-panel', 'family-tools-panel', 'family-pie-panel'];
 
@@ -120,7 +120,7 @@
     if (!customizable) layouts = {};
     const groups = [
       { id: 'work', title: 'Trabalho e Familia', cards: ['overview-card', 'paypal-panel', 'subscriptions-panel', 'dashboard-cards-panel', 'housing-panel', 'vehicle-panel', 'family-panel', 'budget-summary-panel', 'financial-calendar-panel', 'recent-transactions-panel'] },
-      { id: 'investments', title: 'Investimentos', cards: ['goals-panel', 'nubank-boxes-home-panel', 'debt-home-panel', 'consortium-home-panel', 'emergency-reserve-panel', 'family-tools-panel', 'crypto-panel'] },
+      { id: 'investments', title: 'Investimentos', cards: ['real-estate-home-panel', 'goals-panel', 'nubank-boxes-home-panel', 'debt-home-panel', 'consortium-home-panel', 'emergency-reserve-panel', 'family-tools-panel', 'crypto-panel'] },
       { id: 'reports', title: 'Graficos e Resumos', cards: ['work-calendar-panel', 'family-pie-panel', 'balance-projection-panel', 'dashboard-trend-panel'] }
     ];
     sortables.forEach(sortable => sortable.destroy());

@@ -470,7 +470,7 @@
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./service-worker.js?v=325")
+      navigator.serviceWorker.register("./service-worker.js?v=326")
         .then((registration) => registration.update().catch(() => {}))
         .catch(() => {});
     });
@@ -5469,7 +5469,7 @@
   function renderRealEstateContractsPanel(manage = true) {
     const contracts = (state.saleContracts || []).filter(item => manage || (item.kind === "renovation"
       ? !item.endDate || item.endDate >= localDateKey() : propertyReceiptIsScheduled(item, currentMonth())));
-    if (!manage) return `<article class="content-panel">
+    if (!manage) return `<article class="content-panel real-estate-home-panel">
       <div class="panel-head"><h2>Contratos Imobiliários</h2><button class="small-action icon-action" type="button" data-action="open-modal" data-modal="realEstateAdd" aria-label="Adicionar contrato imobiliário">+</button></div>
       <div class="form-grid">${renderPropertyIncomeContracts(contracts.filter(isPropertyIncomeContract), false)}
         ${contracts.filter(item => item.kind === "renovation").map(item => renderRenovationContractCard(item, false)).join("")}
