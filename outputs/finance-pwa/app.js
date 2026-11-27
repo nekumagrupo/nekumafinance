@@ -470,7 +470,7 @@
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./service-worker.js?v=323")
+      navigator.serviceWorker.register("./service-worker.js?v=325")
         .then((registration) => registration.update().catch(() => {}))
         .catch(() => {});
     });
@@ -705,6 +705,7 @@
     if (action === "delete-bank-account") deleteItem("bankAccounts", button.dataset.id, "Conta bancaria removida.");
     if (action === "delete-subscription") deleteItem("subscriptions", button.dataset.id, "Subscricao removida.");
     if (action === "remove-financing-link") removeFinancingLink(button.dataset.id, button.dataset.link);
+    if (action === "undo-property-debt-payment") undoPropertyDebtPayment(button.dataset.id, button.dataset.month);
     if (action === "delete-real-estate-contract") deleteRealEstateContract(button.dataset.id);
     if (action === "delete-forex-trade") {
       if (!hasHouseholdPermission("write")) return;
@@ -812,7 +813,7 @@
     if (formType === "renovation-contract") saveRenovationContract(form);
     if (formType === "renovation-stage") saveRenovationStage(form);
     if (formType === "sale-contract-link") saveSaleContractLink(form);
-    if (formType === "sale-collection") saveSaleCollection(form, event.submitter?.dataset.saleMode);
+    if (formType === "sale-collection") saveSaleCollection(form);
     if (formType === "nubank-box") saveNubankBox(form);
     if (formType === "nubank-box-contribution") saveNubankBoxContribution(form);
     if (formType === "credit-card") saveCreditCard(form);
@@ -909,7 +910,7 @@
         bank.disabled = event.target.checked;
       }
     }
-    if (event.target.id === "monthlyPaymentMethod") updateMonthlyPaymentFields();
+    if (["monthlyPaymentMethod", "monthlyPaymentProperty"].includes(event.target.id)) updateMonthlyPaymentFields();
     if (event.target.id === "housingDefaultPayerId") updateHousingDefaultPayerLabels(event.target);
     if (event.target.closest(".housing-form-row") && event.target.id.endsWith("PayerId")) updateHousingPayerAccount(event.target);
     if (event.target.closest(".housing-form-row") && event.target.id.endsWith("PaymentMethod")) updateHousingPaymentFields();
@@ -4406,6 +4407,7 @@
             ${renderBusinessShoppingPanel()}
           </section>` : ""}
 
+          ${renderRealEstateContractsPanel(false)}
           <section class="content-panel debt-home-panel">
             <div class="panel-head">
               <h2>Financiamentos</h2>
@@ -5464,8 +5466,15 @@
       }).filter(row => number(row.amount) > 0);
   }
 
-  function renderRealEstateContractsPanel() {
-    const contracts = state.saleContracts || [];
+  function renderRealEstateContractsPanel(manage = true) {
+    const contracts = (state.saleContracts || []).filter(item => manage || (item.kind === "renovation"
+      ? !item.endDate || item.endDate >= localDateKey() : propertyReceiptIsScheduled(item, currentMonth())));
+    if (!manage) return `<article class="content-panel">
+      <div class="panel-head"><h2>Contratos Imobiliários</h2><button class="small-action icon-action" type="button" data-action="open-modal" data-modal="realEstateAdd" aria-label="Adicionar contrato imobiliário">+</button></div>
+      <div class="form-grid">${renderPropertyIncomeContracts(contracts.filter(isPropertyIncomeContract), false)}
+        ${contracts.filter(item => item.kind === "renovation").map(item => renderRenovationContractCard(item, false)).join("")}
+        ${contracts.length ? "" : '<p class="empty-state">Nenhum contrato imobiliário ativo.</p>'}</div>
+    </article>`;
     return `<article class="content-panel">
       <div class="panel-head"><h2>Contratos Imobiliários</h2></div>
       <div class="form-grid">
@@ -5474,11 +5483,11 @@
         <section class="form-grid"><div class="panel-head"><h3>Aluguéis</h3><button class="small-action" type="button" data-action="open-modal" data-modal="saleContract" data-id="new:rent">Novo aluguel</button></div>
           ${renderPropertyIncomeContracts(contracts.filter(item => item.kind === "rent"))}</section>
         <section class="form-grid"><div class="panel-head"><h3>Reformas</h3><button class="small-action" type="button" data-action="open-modal" data-modal="renovationContract">Nova reforma</button></div>
-          ${contracts.filter(item => item.kind === "renovation").map(renderRenovationContractCard).join("") || '<p class="empty-state">Nenhuma reforma cadastrada.</p>'}</section>
+          ${contracts.filter(item => item.kind === "renovation").map(item => renderRenovationContractCard(item)).join("") || '<p class="empty-state">Nenhuma reforma cadastrada.</p>'}</section>
       </div></article>`;
   }
 
-  function renderPropertyIncomeContracts(contracts) {
+  function renderPropertyIncomeContracts(contracts, manage = true) {
     const month = state.ui.selectedMonth;
     const today = localDateKey();
     const current = today.slice(0, 7);
@@ -5498,27 +5507,42 @@
         const actualApplied = (state.transactions || []).filter(row => row.saleContractId === sale.id && row.saleMonth === month && row.paymentKey)
           .reduce((total, row) => total + number(row.amount), 0);
         const money = value => formatMoney(value, sale.currency);
+        const receivedTotal = registered.reduce((total, row) => total + number(row.entry.amount), 0);
+        const saleValue = sale.kind === "rent" ? 0 : number(sale.totalValue) || number(sale.amount) * number(sale.termMonths);
+        const due = dateInMonth(month, sale.dueDay);
         return `<section class="debt-progress">
-          <div class="debt-progress-copy"><span>${escapeHtml(sale.payer)} · ${escapeHtml(sale.title)}</span><strong>${money(sale.amount)}/mês</strong></div>
-          ${sale.termMonths ? `<div class="debt-progress-track" aria-hidden="true"><div class="debt-progress-fill" style="width:${registered.length / sale.termMonths * 100}%"></div></div>` : ""}
-          <p>${registered.length}${sale.termMonths ? `/${sale.termMonths}` : ""} parcelas recebidas · ${money(registered.reduce((total, row) => total + number(row.entry.amount), 0))} recebidos${end ? ` · término em ${escapeHtml(formatMonthLabel(end))}` : ""}</p>
-          <p>${escapeHtml(sale.receiptMethod || "Forma de recebimento não informada")}${sale.totalValue ? ` · Valor da venda ${money(sale.totalValue)}` : ""}${bankAccountById(sale.bankAccountId) ? ` · ${escapeHtml(bankAccountName(bankAccountById(sale.bankAccountId)))}` : ""}</p>
-          ${scheduled ? `<p>${receipt ? "Recebido no mês" : `Previsto para ${formatShortDate(dateInMonth(month, sale.dueDay))}`}</p>
+          <div class="debt-progress-copy"><span>${sale.kind === "rent" ? "Aluguel" : "Venda"} · ${escapeHtml(sale.payer)} · ${escapeHtml(sale.title)}</span><strong>${money(sale.amount)}/mês</strong></div>
+          ${saleValue ? `<div class="debt-progress-track" aria-hidden="true"><div class="debt-progress-fill" style="width:${clamp(receivedTotal / saleValue * 100, 0, 100)}%"></div></div>
+            <p>${money(receivedTotal)} de ${money(saleValue)} · ${Math.round(receivedTotal / saleValue * 100)}% do valor da venda</p>` : ""}
+          <p>Início ${escapeHtml(formatMonthLabel(sale.startMonth))} · ${registered.length}${sale.termMonths ? `/${sale.termMonths}` : ""} parcelas recebidas${end ? ` · término em ${escapeHtml(formatMonthLabel(end))}` : ""}</p>
+          <p>${escapeHtml(sale.receiptMethod || "Forma de recebimento não informada")}${bankAccountById(sale.bankAccountId) ? ` · ${escapeHtml(bankAccountName(bankAccountById(sale.bankAccountId)))}` : ""}</p>
+          ${scheduled ? `<p>${receipt ? "Pago" : due < today ? "Em atraso" : "A receber"} · vence ${formatShortDate(due)}${receipt?.date || receipt?.paymentDate ? ` · recebido em ${formatShortDate(receipt.date || receipt.paymentDate)}` : ""}</p>
             ${rows.map(({ debt, amount, paid }) => `<p>${escapeHtml(debt.title)} · ${money(amount)} · ${paid ? "Pago" : "A pagar"}</p>`).join("")}
             ${rows.length ? `<p>Saldo após os destinos · ${money(number(receipt?.amount ?? sale.amount) - totalDestinations)}</p>` : ""}
-            ${receipt ? `<p>Pagamentos registrados por este card no mês · ${money(actualApplied)}</p>` : ""}` : ""}
-          ${registered.length ? `<details><summary>Histórico de recebimentos</summary>${registered.slice().reverse().map(({ reference, entry }) => `<p>${escapeHtml(formatMonthLabel(reference))} · ${money(entry.amount)}</p>`).join("")}</details>` : ""}
+            ${receipt ? `<p>Usado em parcelas deste recebimento · ${money(actualApplied)}</p>` : ""}` : ""}
+          ${manage && registered.length ? `<details><summary>Histórico de recebimentos</summary>${registered.slice().reverse().map(({ reference, entry }) => `<p>${escapeHtml(formatMonthLabel(reference))} · ${money(entry.amount)}</p>`).join("")}</details>` : ""}
           <div class="row-actions">
-            ${scheduled && month <= current && (!receipt || rows.some(row => !row.paid)) ? `<button class="small-action" type="button" data-action="open-modal" data-modal="saleCollect" data-id="${escapeAttr(`${sale.id}|${month}`)}">${receipt ? "Registrar pagamentos" : "Confirmar recebimento"}</button>` : ""}
+            ${scheduled && month <= current && !receipt ? `<button class="small-action" type="button" data-action="open-modal" data-modal="saleCollect" data-id="${escapeAttr(`${sale.id}|${month}`)}">Confirmar recebimento</button>` : ""}
+            ${manage ? `
             <button class="small-action ghost" type="button" data-action="open-modal" data-modal="saleContract" data-id="${escapeAttr(sale.id)}">Editar</button>
-            <button class="small-action ghost" type="button" data-action="delete-real-estate-contract" data-id="${escapeAttr(sale.id)}">Excluir</button>
+            <button class="small-action ghost" type="button" data-action="delete-real-estate-contract" data-id="${escapeAttr(sale.id)}">Excluir</button>` : ""}
           </div>
         </section>`;
-      }).join("") || '<p class="empty-state">Nenhum contrato cadastrado.</p>';
+      }).join("") || (manage ? '<p class="empty-state">Nenhum contrato cadastrado.</p>' : "");
   }
 
   function renderRealEstateLinksButton(debt) {
     return `<button class="small-action ghost" type="button" data-action="open-modal" data-modal="realEstateLinks" data-id="${escapeAttr(debt.id)}">+ Vínculos</button>`;
+  }
+
+  function renderLinkedPropertyMiniCards(debt, month, manage) {
+    const contracts = [debt.saleContractId, debt.rentalContractId].map(id => findItem("saleContracts", id)).filter(isPropertyIncomeContract);
+    const canPay = !manage && !isDebtPaid(debt.id, month) && isDebtActiveInMonth(debt, month) && contracts.length;
+    return `${contracts.map(contract => `<div class="debt-progress">
+      <div class="debt-progress-copy"><span>${contract.kind === "rent" ? "Aluguel · Inquilino" : "Venda · Comprador"}</span><strong>${escapeHtml(contract.payer)}</strong></div>
+      ${contract.kind === "rent" ? "" : `<p>Compra do imóvel · ${contract.purchaseDate ? formatShortDate(contract.purchaseDate) : "data não informada"}</p>`}
+    </div>`).join("")}
+    ${canPay ? `<div class="row-actions"><button class="small-action" type="button" data-action="open-modal" data-modal="monthlyPayment" data-payment-id="debt:${escapeAttr(debt.id)}">Pagar parcela</button></div>` : ""}`;
   }
 
   function renovationContractTotals(contract) {
@@ -5548,11 +5572,11 @@
     return totals;
   }
 
-  function renderRenovationContractCard(contract) {
+  function renderRenovationContractCard(contract, manage = true) {
     const { planned, committed, paid } = renovationContractTotals(contract);
     const money = value => formatMoney(value, contract.currency);
     return `<section class="debt-progress">
-      <div class="debt-progress-copy"><span>${escapeHtml(contract.title)} · ${escapeHtml(contract.property)}</span><strong>${money(contract.budget)}</strong></div>
+      <div class="debt-progress-copy"><span>Reforma · ${escapeHtml(contract.title)} · ${escapeHtml(contract.property)}</span><strong>${money(contract.budget)}</strong></div>
       ${contract.endDate ? `<p>Conclusão prevista para ${formatShortDate(contract.endDate)}</p>` : ""}
       <div class="debt-card-grid">
         <div class="debt-card-stat"><span>Previsto</span><strong>${money(planned)}</strong></div>
@@ -5560,14 +5584,14 @@
         <div class="debt-card-stat"><span>Pago</span><strong>${money(paid)}</strong></div>
         <div class="debt-card-stat"><span>Saldo do orçamento</span><strong>${money(number(contract.budget) - committed - paid)}</strong></div>
       </div>
-      ${(contract.stages || []).length ? `<details><summary>Materiais e serviços</summary>
+      ${manage && (contract.stages || []).length ? `<details><summary>Materiais e serviços</summary>
         ${contract.stages.map(stage => `<div class="debt-progress-copy"><span>${escapeHtml(stage.name)} · ${stage.category === "service" ? "Serviço" : "Material"} · ${renovationStageStatuses[stage.status] || ""} · ${money(stage.amount)}</span>
           <button class="small-action ghost" type="button" data-action="open-modal" data-modal="renovationStage" data-id="${escapeAttr(`${contract.id}|${stage.id}`)}">Editar etapa</button></div>`).join("")}</details>` : ""}
-      <div class="row-actions">
+      ${manage ? `<div class="row-actions">
         <button class="small-action" type="button" data-action="open-modal" data-modal="renovationStage" data-id="${escapeAttr(contract.id)}">Adicionar etapa</button>
         <button class="small-action ghost" type="button" data-action="open-modal" data-modal="renovationContract" data-id="${escapeAttr(contract.id)}">Editar</button>
         <button class="small-action ghost" type="button" data-action="delete-real-estate-contract" data-id="${escapeAttr(contract.id)}">Excluir</button>
-      </div></section>`;
+      </div>` : ""}</section>`;
   }
 
   function renderRealEstateLinksModal(debt) {
@@ -7324,8 +7348,10 @@
                 ${item.type === "financing" ? renderFinancingPaymentBreakdown(item, progress.paid, progressPercent) : ""}
               </div>
               ${manage && item.type === "financing" && (item.renovation || item.propertyReceipt) ? renderFinancingLinks(item, state.ui.selectedMonth) : ""}
+              ${renderLinkedPropertyMiniCards(item, state.ui.selectedMonth, manage)}
               <div class="row-actions">${renderRealEstateLinksButton(item)}${manage ? `
                 <button class="small-action ${paid ? "ghost" : ""}" type="button" data-action="${paid ? "none" : "open-modal"}" data-modal="monthlyPayment" data-payment-id="debt:${item.id}">${paid ? "Pago" : "Pagar"}</button>
+                ${renderUndoPropertyDebtPayment(item, state.ui.selectedMonth)}
                 <button class="small-action ghost" type="button" data-action="open-modal" data-modal="debt" data-id="${item.id}">Editar</button>
                 <button class="small-action ghost" type="button" data-action="delete-debt" data-id="${item.id}">Excluir</button>
               ` : ""}</div>
@@ -7566,8 +7592,10 @@
                 </div>
               </details>
 
+              ${renderLinkedPropertyMiniCards(item, state.ui.selectedMonth, manage)}
               <div class="row-actions">${renderRealEstateLinksButton(item)}${manage ? `
                 <button class="small-action ${paidThisMonth ? "ghost" : ""}" type="button" data-action="${paidThisMonth ? "none" : "open-modal"}" data-modal="monthlyPayment" data-payment-id="debt:${item.id}">${paidThisMonth ? "✓ Pago" : "Pagar"}</button>
+                ${renderUndoPropertyDebtPayment(item, state.ui.selectedMonth)}
                 <button class="small-action ghost" type="button" data-action="open-modal" data-modal="debt" data-id="${item.id}">Editar</button>
                 <button class="small-action ghost" type="button" data-action="delete-debt" data-id="${item.id}">Excluir</button>
               ` : ""}</div>
@@ -10208,6 +10236,10 @@
       saleContract: item => renderSaleContractModal(item, "", id === "new:rent" ? "rent" : "sale"),
       saleContractLink: renderSaleContractLinkModal,
       realEstateLinks: renderRealEstateLinksModal,
+      realEstateAdd: () => `<div class="modal-head"><h2>Novo contrato imobiliário</h2><button class="close-button" type="button" data-action="close-modal" aria-label="Fechar">x</button></div>
+        <div class="form-grid"><button class="secondary-button" type="button" data-action="open-modal" data-modal="saleContract">Venda</button>
+        <button class="secondary-button" type="button" data-action="open-modal" data-modal="saleContract" data-id="new:rent">Aluguel</button>
+        <button class="secondary-button" type="button" data-action="open-modal" data-modal="renovationContract">Reforma</button></div>`,
       realEstateLink: renderTypedRealEstateLinkModal,
       renovationContract: renderRenovationContractModal,
       renovationStage: renderRenovationStageModal,
@@ -13172,11 +13204,12 @@
           <div class="field"><label for="saleTerm">Prazo em meses${rental ? " (opcional)" : ""}</label><input id="saleTerm" name="termMonths" type="number" min="1" max="1200" ${rental ? "" : "required"} value="${escapeAttr(sale?.termMonths ?? "")}" /></div>
         </div>
         <div class="two-cols">
-          ${rental ? "" : `<div class="field"><label for="saleTotalValue">Valor total da venda</label><input id="saleTotalValue" name="totalValue" type="number" min="0" step=".01" value="${escapeAttr(sale?.totalValue ?? "")}" /></div>`}
+          ${rental ? "" : `<div class="field"><label for="saleTotalValue">Valor total da venda</label><input id="saleTotalValue" name="totalValue" type="number" min="0" step=".01" value="${escapeAttr(sale?.totalValue ?? "")}" /></div>
+          <div class="field"><label for="salePurchaseDate">Data da compra do imóvel</label><input id="salePurchaseDate" name="purchaseDate" type="date" value="${escapeAttr(sale?.purchaseDate || "")}" /></div>`}
           <div class="field"><label for="saleReceiptMethod">Forma de recebimento</label><select id="saleReceiptMethod" name="receiptMethod">
             ${["", "Pix", "TED", "Dinheiro", "Débito em conta", "Outro"].map(method => `<option value="${method}" ${selectedAttr(method, sale?.receiptMethod)}>${method || "Selecione"}</option>`).join("")}
           </select></div></div>
-        <div class="field"><label for="saleAccount">Conta de recebimento</label><select id="saleAccount" name="bankAccountId" required>${bankAccountSelectOptions("global", sale?.bankAccountId, "Selecione a conta")}</select></div>
+        <div class="field"><label for="saleAccount">Conta de recebimento para Pix, TED ou débito</label><select id="saleAccount" name="bankAccountId">${bankAccountSelectOptions("global", sale?.bankAccountId, "Sem conta vinculada")}</select></div>
         ${legacyDebtId ? "<p class='row-meta'>Os pagamentos históricos serão reaproveitados, e o financiamento ficará vinculado ao novo contrato.</p>" : ""}
         ${renderRealEstateLinkPicker(kind, sale, legacyDebtId)}
         <div class="form-actions"><button class="secondary-button" type="button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">Salvar contrato</button></div>
@@ -13218,25 +13251,20 @@
     const sale = findItem("saleContracts", id);
     if (!isPropertyIncomeContract(sale) || !propertyReceiptIsScheduled(sale, month) || month > currentMonth()) return "";
     const receipt = saleReceiptForMonth(sale, month);
-    const rows = saleAllocationRows(sale, month);
-    const account = bankAccountById(receipt ? receipt.bankAccountId : sale.bankAccountId);
-    const canApply = account?.active !== false && account?.currency === sale.currency && rows.some(row => !row.paid);
+    if (receipt) return "";
+    const account = bankAccountById(sale.bankAccountId);
     const label = sale.kind === "rent" ? "do aluguel" : "da venda";
-    return `<div class="modal-head"><h2>${receipt ? `Registrar pagamentos ${label}` : `Confirmar recebimento ${label}`}</h2><button class="close-button" type="button" data-action="close-modal" aria-label="Fechar">x</button></div>
+    return `<div class="modal-head"><h2>Confirmar recebimento ${label}</h2><button class="close-button" type="button" data-action="close-modal" aria-label="Fechar">x</button></div>
       <form class="form-grid" data-form="sale-collection">
         ${editHidden(sale)}<input type="hidden" name="month" value="${escapeAttr(month)}" />
         <p class="row-meta">${escapeHtml(sale.payer)} · ${escapeHtml(formatMonthLabel(month))}${account ? ` · ${escapeHtml(bankAccountName(account))}` : ""}</p>
         <div class="two-cols">
-          <div class="field"><label for="saleReceiptAmount">Valor recebido</label><input id="saleReceiptAmount" name="amount" type="number" min=".01" step="${sale.currency === "JPY" ? "1" : ".01"}" required ${receipt ? "readonly" : ""} value="${escapeAttr(receipt?.amount ?? sale.amount)}" /></div>
-          <div class="field"><label for="saleReceiptDate">Data dos lançamentos</label><input id="saleReceiptDate" name="date" type="date" required max="${localDateKey()}" value="${month === currentMonth() ? localDateKey() : ""}" /></div>
+          <div class="field"><label for="saleReceiptAmount">Valor recebido</label><input id="saleReceiptAmount" name="amount" type="number" min=".01" step="${sale.currency === "JPY" ? "1" : ".01"}" required value="${escapeAttr(sale.amount)}" /></div>
+          <div class="field"><label for="saleReceiptDate">Data do recebimento</label><input id="saleReceiptDate" name="date" type="date" required max="${localDateKey()}" value="${month === currentMonth() ? localDateKey() : ""}" /></div>
         </div>
-        ${rows.map(({ debt, amount, paid }) => `<p class="row-meta">${escapeHtml(debt.title)} · ${formatMoney(amount, sale.currency)} · ${paid ? "Já pago" : "A pagar"}</p>`).join("")}
-        ${receipt && !account ? '<p class="row-meta">Esse recebimento histórico não tem conta vinculada. Registre os pagamentos restantes nos respectivos contratos.</p>' : ""}
-        <p class="row-meta">Confirme somente os movimentos que já ocorreram.</p>
         <div class="form-actions">
           <button class="secondary-button" type="button" data-action="close-modal">Depois</button>
-          ${!receipt ? '<button class="secondary-button" type="submit" data-sale-mode="receipt">Registrar só o recebimento</button>' : ""}
-          ${canApply ? `<button class="primary-button" type="submit" data-sale-mode="apply">${receipt ? "Confirmar pagamentos já feitos" : "Recebi e paguei as parcelas"}</button>` : ""}
+          <button class="primary-button" type="submit">Confirmar recebimento</button>
         </div>
       </form>`;
   }
@@ -13331,6 +13359,7 @@
       `;
     }
     const sourceOptions = monthlyPaymentSourceOptions();
+    const propertySources = target.kind === "debt" ? propertyPaymentSources(target.id, target.month) : [];
     const creditCards = (state.creditCards || []).filter((card) => card.country === target.country);
     const previousPayment = state.paidCommitments?.[target.paymentKey];
     const previouslyPaid = target.kind === "card" && previousPayment && typeof previousPayment === "object" ? number(previousPayment.amount) : 0;
@@ -13357,6 +13386,7 @@
               <option value="pix" ${selectedAttr("pix", target.paymentMethod)}>Pix</option>
               <option value="bank" ${selectedAttr("bank", target.paymentMethod)}>Debito em conta</option>
               ${target.kind === "card" ? "" : `<option value="card" ${selectedAttr("card", target.paymentMethod)}>Cartão de crédito</option>`}
+              ${propertySources.length ? '<option value="property">Contrato de venda ou aluguel</option>' : ""}
               ${target.financing ? `<option value="thirdParty" ${selectedAttr("thirdParty", findItem("debts", target.id)?.propertyReceipt?.destination === "direct" ? "thirdParty" : "")}>Pago por terceiro</option>` : ""}
               <option value="kombini" ${selectedAttr("kombini", target.paymentMethod)}>Kombini</option>
               <option value="cash" ${selectedAttr("cash", target.paymentMethod)}>Dinheiro</option>
@@ -13371,6 +13401,11 @@
             </select>
           </div>
         </div>
+        ${propertySources.length ? `<div class="field monthly-payment-property-field is-hidden">
+          <label for="monthlyPaymentProperty">Recebimento do imóvel</label>
+          <select id="monthlyPaymentProperty" name="propertyContractId">${propertySources.map(({ contract, receipt, available }) =>
+            `<option value="${escapeAttr(contract.id)}" data-receipt-date="${escapeAttr(receipt.date || "")}">${contract.kind === "rent" ? "Aluguel" : "Venda"} · ${escapeHtml(contract.payer)} · ${formatMoney(available, contract.currency)} disponível</option>`).join("")}</select>
+        </div>` : ""}
         <div class="field monthly-payment-bank-field">
           <label for="monthlyPaymentBankAccountId">Conta usada</label>
           <select id="monthlyPaymentBankAccountId" name="bankAccountId">
@@ -14069,6 +14104,30 @@
     showToast("Etapa salva.");
   }
 
+  function renderUndoPropertyDebtPayment(item, month) {
+    if (!state.paidCommitments?.[debtPaymentKey(item.id, month)]?.saleContractId) return "";
+    return `<button class="small-action ghost" type="button" data-action="undo-property-debt-payment" data-id="${escapeAttr(item.id)}" data-month="${escapeAttr(month)}">Desfazer baixa imobiliária</button>`;
+  }
+
+  function undoPropertyDebtPayment(id, month) {
+    if (!hasHouseholdPermission("write") || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month || "")) return;
+    const item = findItem("debts", id);
+    if (!item || !["financing", "consortium"].includes(item.type)) return;
+    const key = debtPaymentKey(id, month);
+    const saleId = state.paidCommitments?.[key]?.saleContractId;
+    if (!saleId) return;
+    if (!window.confirm(`Desfazer a baixa de ${item.title} em ${formatMonthLabel(month)}? A parcela volta a ficar pendente. O recebimento do imóvel e os outros pagamentos serão preservados.`)) return;
+    const linked = (state.transactions || []).filter(row => row.paymentKey === key && row.saleContractId === saleId &&
+      row.paymentRef === `debt:${id}` && ["debt", "consortium"].includes(row.type));
+    const ids = new Set(linked.map(row => row.id));
+    state.transactions = state.transactions.filter(row => !ids.has(row.id));
+    rememberDeletedItems("transactions", linked);
+    delete state.paidCommitments[key];
+    saveState({ remoteNow: true });
+    render();
+    showToast("Baixa desfeita. A parcela voltou a ficar pendente.");
+  }
+
   function deleteRealEstateContract(id) {
     if (!hasHouseholdPermission("write") || !findItem("saleContracts", id)) return;
     if (!window.confirm("Excluir este contrato imobiliário e remover seus vínculos? Os lançamentos e pagamentos já registrados serão preservados.")) return;
@@ -14108,7 +14167,10 @@
     const account = bankAccountById(data.bankAccountId);
     if (!title || !payer || amount <= 0 || !Number.isInteger(dueDay) || dueDay < 1 || dueDay > 31 ||
         (termMonths !== null && (!Number.isInteger(termMonths) || termMonths < 1 || termMonths > 1200)) ||
-        !/^\d{4}-(0[1-9]|1[0-2])$/.test(data.startMonth || "") || !account || account.active === false || account.currency !== currency ||
+        !/^\d{4}-(0[1-9]|1[0-2])$/.test(data.startMonth || "") ||
+        (["Pix", "TED", "Débito em conta"].includes(data.receiptMethod) && !account) ||
+        (data.bankAccountId && (!account || account.active === false || account.currency !== currency)) ||
+        (kind === "sale" && data.purchaseDate && !isValidIsoDate(data.purchaseDate)) ||
         (currency === "JPY" && !Number.isInteger(amount))) {
       showToast("Confira os dados e selecione uma conta na moeda do contrato.");
       return;
@@ -14120,8 +14182,8 @@
       return;
     }
     upsertItem("saleContracts", id, { kind, title, payer, amount, currency, dueDay, termMonths, totalValue,
-      receiptMethod: String(data.receiptMethod || "").trim(), startMonth: data.startMonth,
-      bankAccountId: account.id, ...(legacy ? { legacyDebtId: legacy.id, legacyDestination: legacy.propertyReceipt.destination } : {}) });
+      receiptMethod: String(data.receiptMethod || "").trim(), startMonth: data.startMonth, purchaseDate: kind === "sale" ? data.purchaseDate || "" : "",
+      bankAccountId: account?.id || "", ...(legacy ? { legacyDebtId: legacy.id, legacyDestination: legacy.propertyReceipt.destination } : {}) });
     links.forEach(link => upsertItem("debts", link.id, link.changes));
     if (legacy) upsertItem("debts", legacy.id, { [realEstateContractTypes[kind].field]: id, propertyReceipt: null });
     saveState({ remoteNow: true });
@@ -14155,55 +14217,34 @@
     showToast(sale ? "Contrato imobiliário vinculado." : "Vínculo removido.");
   }
 
-  function saveSaleCollection(form, mode) {
+  function saveSaleCollection(form) {
     const data = formData(form);
     const sale = findItem("saleContracts", data.id);
     const { month, date } = data;
     if (!isPropertyIncomeContract(sale) || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month || "") || !propertyReceiptIsScheduled(sale, month) || month > currentMonth() ||
-        !isValidIsoDate(date) || date > localDateKey() || !["receipt", "apply"].includes(mode)) return;
-    const receipt = saleReceiptForMonth(sale, month);
-    const amount = number(receipt?.amount ?? data.amount);
-    const account = bankAccountById(receipt ? receipt.bankAccountId : sale.bankAccountId);
-    if (amount <= 0 || (sale.currency === "JPY" && !Number.isInteger(amount)) || !account ||
-        account.active === false || account.currency !== sale.currency) {
+        !isValidIsoDate(date) || date > localDateKey()) return;
+    if (saleReceiptForMonth(sale, month)) {
+      showToast("O recebimento deste mês já está registrado.");
+      return;
+    }
+    const amount = number(data.amount);
+    const account = bankAccountById(sale.bankAccountId);
+    if (amount <= 0 || (sale.currency === "JPY" && !Number.isInteger(amount)) ||
+        (sale.bankAccountId && (!account || account.active === false || account.currency !== sale.currency))) {
       showToast("Confira o valor e a conta de recebimento do contrato.");
       return;
     }
-    const rows = mode === "apply" ? saleAllocationRows(sale, month).filter(row => !row.paid) : [];
-    const applied = (state.transactions || []).filter(row => row.saleContractId === sale.id && row.saleMonth === month && row.paymentKey)
-      .reduce((sum, row) => sum + number(row.amount), 0);
-    if (rows.length && round(applied + rows.reduce((sum, row) => sum + number(row.amount), 0), 2) > amount) {
-      showToast("O recebido não cobre todas as prestações pendentes. Registre só o recebimento ou pague os destinos individualmente.");
-      return;
-    }
-    if (receipt && !rows.length) {
-      showToast("Este mês já está registrado.");
-      return;
-    }
-    const base = { date, country: account.country, currency: sale.currency, bankAccountId: account.id, saleContractId: sale.id, saleMonth: month };
-    if (!receipt) {
-      const incomeId = `tx_sale_${sale.id}_${month}`;
-      const category = sale.kind === "rent" ? "Aluguel recebido" : "Parcela da venda";
-      upsertItem("transactions", state.deletedItems?.transactions?.[incomeId] ? "" : incomeId, {
-        ...base, type: "income", title: `${category} · ${sale.title}`, category, amount
-      }, true);
-    }
-    for (const { debt, amount: installment } of rows) {
-      const paymentKey = debtPaymentKey(debt.id, month);
-      const consortium = debt.type === "consortium";
-      const expenseId = `tx_sale_pay_${debt.id}_${month}`;
-      upsertItem("transactions", state.deletedItems?.transactions?.[expenseId] ? "" : expenseId, {
-        ...base, type: consortium ? "consortium" : "debt", title: `Parcela ${debt.title}`, category: consortium ? "Consórcio" : "Financiamento",
-        amount: installment, paymentMethod: "bank", paymentRef: `debt:${debt.id}`, paymentKey,
-        consortiumAmortizationRate: consortium ? number(debt.monthlyAmortizationRate) : 0
-      }, true);
-      state.paidCommitments[paymentKey] = { amount: installment, expectedAmount: installment, status: "paid",
-        method: "bank", bankAccountId: account.id, saleContractId: sale.id, paidAt: new Date().toISOString(), paymentDate: date };
-    }
+    const incomeId = `tx_sale_${sale.id}_${month}`;
+    const category = sale.kind === "rent" ? "Aluguel recebido" : "Parcela da venda";
+    upsertItem("transactions", state.deletedItems?.transactions?.[incomeId] ? "" : incomeId, {
+      date, country: account?.country || (sale.currency === "BRL" ? "brasil" : "japao"), currency: sale.currency,
+      bankAccountId: account?.id || "", saleContractId: sale.id, saleMonth: month,
+      type: "income", title: `${category} · ${sale.title}`, category, amount
+    }, true);
     saveState({ remoteNow: true });
     closeModal();
     render();
-    showToast(rows.length ? "Pagamentos registrados nos contratos vinculados." : "Recebimento registrado.");
+    showToast("Recebimento registrado.");
   }
 
   function saveFinancingLinks(form) {
@@ -15277,6 +15318,53 @@
     showToast(updated ? "Apontamento atualizado." : "Apontamento salvo.");
   }
 
+  function propertyPaymentSources(debtId, month) {
+    const debt = findItem("debts", debtId);
+    if (!debt) return [];
+    return [...new Set([debt.saleContractId, debt.rentalContractId])].flatMap(id => {
+      const contract = findItem("saleContracts", id);
+      if (!isPropertyIncomeContract(contract) || contract.currency !== debt.currency || !propertyReceiptIsScheduled(contract, month)) return [];
+      const receipt = saleReceiptForMonth(contract, month);
+      if (receipt?.type !== "income" || receipt.currency !== contract.currency) return [];
+      const account = bankAccountById(receipt.bankAccountId);
+      if (receipt.bankAccountId && (!account || account.active === false || account.currency !== contract.currency)) return [];
+      const applied = (state.transactions || []).filter(row => row.saleContractId === id && row.saleMonth === month && row.paymentKey)
+        .reduce((total, row) => total + number(row.amount), 0);
+      return [{ contract, receipt, account, available: round(number(receipt.amount) - applied, 2) }];
+    });
+  }
+
+  function savePropertyFundedDebtPayment(target, data) {
+    if (state.paidCommitments[target.paymentKey]) return;
+    const source = target.kind === "debt" && propertyPaymentSources(target.id, target.month)
+      .find(row => row.contract.id === data.propertyContractId);
+    const amount = number(target.amount);
+    if (!source || source.available < amount || !isValidIsoDate(data.date) ||
+        data.date > localDateKey() || data.date < source.receipt.date) {
+      showToast("Confira a data e o valor disponível do contrato imobiliário.");
+      return;
+    }
+    const debt = findItem("debts", target.id);
+    const saleId = source.contract.id;
+    const accountId = source.account?.id || "";
+    const method = accountId ? "bank" : "cash";
+    const id = `tx_sale_pay_${target.id}_${target.month}`;
+    upsertItem("transactions", state.deletedItems?.transactions?.[id] ? "" : id, {
+      date: data.date, country: source.account?.country || target.country, currency: target.currency,
+      type: target.type, title: target.transactionTitle || target.title, category: target.category, amount,
+      bankAccountId: accountId, paymentMethod: method, saleContractId: saleId, saleMonth: target.month,
+      paymentRef: `debt:${target.id}`, paymentKey: target.paymentKey,
+      consortiumAmortizationRate: debt?.type === "consortium" ? number(debt.monthlyAmortizationRate) : 0,
+      note: String(data.note || "").trim()
+    }, true);
+    state.paidCommitments[target.paymentKey] = { amount, expectedAmount: amount, status: "paid", method,
+      bankAccountId: accountId, saleContractId: saleId, paidAt: new Date().toISOString(), paymentDate: data.date };
+    saveState({ remoteNow: true });
+    closeModal();
+    render();
+    showToast("Parcela paga com o recebimento do imóvel.");
+  }
+
   function saveMonthlyPayment(form) {
     const data = formData(form);
     const target = paymentTargetFromRef(data.paymentRef);
@@ -15299,6 +15387,10 @@
     }
 
     const paymentMethod = data.paymentMethod || "balance";
+    if (paymentMethod === "property") {
+      savePropertyFundedDebtPayment(target, data);
+      return;
+    }
     const thirdParty = paymentMethod === "thirdParty";
     if (thirdParty && (!target.financing || financingPropertyReceiptForMonth(target.id, target.month))) {
       showToast("Confira se já existe um recebimento deste imóvel no mês.");
@@ -15801,9 +15893,18 @@
     const bankField = modalRoot.querySelector(".monthly-payment-bank-field");
     const cardSelect = modalRoot.querySelector("#monthlyPaymentCardId");
     const sourceField = modalRoot.querySelector(".monthly-payment-source-field");
-    if (sourceField) sourceField.classList.toggle("is-hidden", method === "thirdParty");
+    const propertyField = modalRoot.querySelector(".monthly-payment-property-field");
+    const propertySelect = modalRoot.querySelector("#monthlyPaymentProperty");
+    const date = modalRoot.querySelector("#monthlyPaymentDate");
+    if (date) {
+      date.min = method === "property" ? propertySelect?.selectedOptions[0]?.dataset.receiptDate || "" : "";
+      date.max = method === "property" ? localDateKey() : "";
+      if (method === "property" && (date.value < date.min || date.value > date.max)) date.value = date.max;
+    }
+    if (propertyField) propertyField.classList.toggle("is-hidden", method !== "property");
+    if (sourceField) sourceField.classList.toggle("is-hidden", method === "thirdParty" || method === "property");
     if (cardField) cardField.classList.toggle("is-hidden", method !== "card");
-    if (bankField) bankField.classList.toggle("is-hidden", method === "card" || method === "thirdParty");
+    if (bankField) bankField.classList.toggle("is-hidden", method === "card" || method === "thirdParty" || method === "property");
     if (cardSelect) cardSelect.required = method === "card";
   }
 
