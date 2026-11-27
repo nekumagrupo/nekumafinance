@@ -470,7 +470,7 @@
 
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./service-worker.js?v=322")
+      navigator.serviceWorker.register("./service-worker.js?v=323")
         .then((registration) => registration.update().catch(() => {}))
         .catch(() => {});
     });
@@ -851,6 +851,7 @@
   });
 
   document.addEventListener("input", (event) => {
+    if (event.target.id === "saleAmount") updateRealEstateLinkPicker(event.target.form);
     if (event.target.id === "globalSearchInput") renderGlobalSearchResults(event.target.value);
     if (event.target.matches("#recoveryCode")) {
       event.target.value = String(event.target.value || "").replace(/\D/g, "").slice(0, 6);
@@ -862,6 +863,9 @@
   });
 
   document.addEventListener("change", (event) => {
+    if (["saleCurrency", "renovationContractCurrency"].includes(event.target.id) || event.target.name === "linkedDebtIds") {
+      updateRealEstateLinkPicker(event.target.form);
+    }
     if (event.target.matches("[data-public-language]")) {
       i18n?.setPublicLanguage(event.target.value);
       window.location.reload();
@@ -10288,6 +10292,7 @@
     updateDebtTypeFields();
     updateMonthlyPaymentFields();
     restrictSingleCurrencyFields(modalRoot);
+    updateRealEstateLinkPicker(modalRoot.querySelector("form"));
     if (readOnly) {
       modalRoot.querySelectorAll("form input, form select, form textarea, form button").forEach(control => { control.disabled = true; });
       const notice = document.createElement("div"); notice.innerHTML = renderPlanLock("Consulta do historico"); modalRoot.querySelector(".modal")?.append(notice);
@@ -13048,6 +13053,60 @@
     return { housing, deductions: { ...original, ...amounts, configured: original.configured || hasAmounts, entries, total, net: Math.max(0, number(target.grossAmount) - total) } };
   }
 
+  function realEstateLinkDebtIsActive(debt) {
+    return debt.active !== false && isDebtActiveInMonth(debt, currentMonth());
+  }
+
+  function renderRealEstateLinkPicker(kind, contract, legacyDebtId) {
+    const { field } = realEstateContractTypes[kind];
+    const debts = (state.debts || []).filter(debt => ["financing", "consortium"].includes(debt.type) &&
+      (debt.id === legacyDebtId || (contract?.id && debt[field] === contract.id) || realEstateLinkDebtIsActive(debt)));
+    return `<fieldset class="form-grid" data-real-estate-link-picker>
+      <legend>Vincular financiamentos e consórcios (opcional)</legend>
+      <p class="row-meta">${kind === "renovation" ? "O vínculo associa a obra ao contrato para consulta." : "Selecione quais prestações podem ser cobertas pelo recebimento."}</p>
+      ${debts.map(debt => {
+        const selected = Boolean(debt.id === legacyDebtId || (contract?.id && debt[field] === contract.id));
+        const occupied = debt[field] && debt[field] !== contract?.id;
+        const oldLink = !selected && (kind === "renovation" ? debt.renovation : debt.propertyReceipt?.kind === kind);
+        const locked = debt.id === legacyDebtId || occupied || oldLink;
+        const status = occupied ? " · Já vinculado a outro contrato" : oldLink ? " · Importe o vínculo anterior" : "";
+        const type = debt.type === "consortium" ? "Consórcio" : "Financiamento";
+        return `<div data-debt-currency="${escapeAttr(debt.currency)}" data-link-locked="${locked ? "yes" : "no"}"><label>
+          <input type="checkbox" name="linkedDebtIds" value="${escapeAttr(debt.id)}" data-installment="${kind === "renovation" ? 0 : debtNextPaymentAmount(debt)}" ${selected ? "checked" : ""} ${locked ? "disabled" : ""} />
+          ${escapeHtml(debt.title)} · ${type}${status}
+          ${kind === "renovation" ? "" : ` · ${formatMoney(debtNextPaymentAmount(debt), debt.currency)}`}
+        </label></div>`;
+      }).join("")}
+      <p class="row-meta" data-link-empty hidden>Nenhum financiamento ou consórcio disponível nessa moeda.</p>
+      ${kind === "renovation" ? "" : '<p class="row-meta" data-link-preview aria-live="polite"></p>'}
+    </fieldset>`;
+  }
+
+  function updateRealEstateLinkPicker(form) {
+    const picker = form?.querySelector("[data-real-estate-link-picker]");
+    if (!picker) return;
+    const currency = form.elements.currency.value;
+    let visible = 0;
+    let total = 0;
+    for (const row of picker.querySelectorAll("[data-debt-currency]")) {
+      const input = row.querySelector("input");
+      row.hidden = row.dataset.debtCurrency !== currency;
+      input.disabled = row.hidden || row.dataset.linkLocked === "yes";
+      if (!row.hidden) {
+        visible++;
+        if (input.checked) total += number(input.dataset.installment);
+      }
+    }
+    picker.querySelector("[data-link-empty]").hidden = visible > 0;
+    const preview = picker.querySelector("[data-link-preview]");
+    if (!preview) return;
+    const amount = number(form.elements.amount.value);
+    const remainder = round(amount - total, 2);
+    preview.textContent = amount > 0 && total > 0
+      ? `Entrada prevista ${formatMoney(amount, currency)} · Prestações ${formatMoney(total, currency)} · ${remainder < 0 ? "Faltam" : "Sobra"} ${formatMoney(Math.abs(remainder), currency)}`
+      : "";
+  }
+
   function renderRenovationContractModal(item = null, legacyDebtId = "") {
     if (item?.id && item.kind !== "renovation") return "";
     return `<div class="modal-head"><h2>Contrato de reforma</h2><button class="close-button" type="button" data-action="close-modal" aria-label="Fechar">x</button></div>
@@ -13062,6 +13121,7 @@
           <div class="field"><label for="renovationEndDate">Conclusão prevista</label><input id="renovationEndDate" name="endDate" type="date" value="${escapeAttr(item?.endDate || "")}" /></div>
         </div>
         ${legacyDebtId || item?.legacyDebtId ? `<div class="field"><label for="renovationLegacyPending">Valor a pagar importado</label><input id="renovationLegacyPending" name="legacyCommitments" type="number" min="0" step=".01" value="${escapeAttr(item?.legacyCommitments || 0)}" /></div>` : ""}
+        ${renderRealEstateLinkPicker("renovation", item, legacyDebtId)}
         <div class="form-actions"><button class="secondary-button" type="button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">Salvar reforma</button></div>
       </form>`;
   }
@@ -13118,6 +13178,7 @@
           </select></div></div>
         <div class="field"><label for="saleAccount">Conta de recebimento</label><select id="saleAccount" name="bankAccountId" required>${bankAccountSelectOptions("global", sale?.bankAccountId, "Selecione a conta")}</select></div>
         ${legacyDebtId ? "<p class='row-meta'>Os pagamentos históricos serão reaproveitados, e o financiamento ficará vinculado ao novo contrato.</p>" : ""}
+        ${renderRealEstateLinkPicker(kind, sale, legacyDebtId)}
         <div class="form-actions"><button class="secondary-button" type="button" data-action="close-modal">Cancelar</button><button class="primary-button" type="submit">Salvar contrato</button></div>
       </form>`;
   }
@@ -13945,6 +14006,21 @@
     showToast(updated ? "Conta fixa atualizada." : "Conta fixa salva.");
   }
 
+  function prepareRealEstateLinkChanges(ids, kind, contractId, currency) {
+    const { field } = realEstateContractTypes[kind];
+    const selected = new Set(ids);
+    for (const id of selected) {
+      const debt = findItem("debts", id);
+      const linked = debt?.[field] === contractId;
+      const oldLink = kind === "renovation" ? debt?.renovation : debt?.propertyReceipt?.kind === kind;
+      if (!debt || !["financing", "consortium"].includes(debt.type) || debt.currency !== currency ||
+          (!linked && (debt[field] || oldLink || !realEstateLinkDebtIsActive(debt)))) return null;
+    }
+    return (state.debts || []).filter(debt => debt.currency === currency &&
+      (debt[field] === contractId) !== selected.has(debt.id))
+      .map(debt => ({ id: debt.id, changes: { [field]: selected.has(debt.id) ? contractId : null } }));
+  }
+
   function saveRenovationContract(form) {
     const data = formData(form);
     const existing = findItem("saleContracts", data.id);
@@ -13959,9 +14035,16 @@
       return;
     }
     const id = existing?.id || (legacy ? `sc_renovation_${legacy.id}` : uid("sc"));
+    const currency = existing?.currency || legacy?.currency || sanitizeCurrency(data.currency);
+    const links = prepareRealEstateLinkChanges(new FormData(form).getAll("linkedDebtIds"), "renovation", id, currency);
+    if (!links) {
+      showToast("Confira os vínculos. Selecione contratos ativos e disponíveis na mesma moeda.");
+      return;
+    }
     upsertItem("saleContracts", id, { kind: "renovation", title, property, budget,
-      currency: existing?.currency || legacy?.currency || sanitizeCurrency(data.currency), endDate: data.endDate || "",
+      currency, endDate: data.endDate || "",
       legacyCommitments: Math.max(0, number(data.legacyCommitments)), ...(legacy ? { legacyDebtId: legacy.id } : {}) });
+    links.forEach(link => upsertItem("debts", link.id, link.changes));
     if (legacy) upsertItem("debts", legacy.id, { renovationContractId: id, renovation: null });
     saveState({ remoteNow: true });
     closeModal();
@@ -14031,9 +14114,15 @@
       return;
     }
     const id = existing?.id || (legacy ? `sc_import_${kind}_${legacy.id}` : uid("sc"));
+    const links = prepareRealEstateLinkChanges(new FormData(form).getAll("linkedDebtIds"), kind, id, currency);
+    if (!links) {
+      showToast("Confira os vínculos. Selecione contratos ativos e disponíveis na mesma moeda.");
+      return;
+    }
     upsertItem("saleContracts", id, { kind, title, payer, amount, currency, dueDay, termMonths, totalValue,
       receiptMethod: String(data.receiptMethod || "").trim(), startMonth: data.startMonth,
       bankAccountId: account.id, ...(legacy ? { legacyDebtId: legacy.id, legacyDestination: legacy.propertyReceipt.destination } : {}) });
+    links.forEach(link => upsertItem("debts", link.id, link.changes));
     if (legacy) upsertItem("debts", legacy.id, { [realEstateContractTypes[kind].field]: id, propertyReceipt: null });
     saveState({ remoteNow: true });
     closeModal();
